@@ -1,94 +1,144 @@
+// 围棋核心规则 - 使用扁平Int8Array优化性能
 class GoBoard {
-    constructor(size = 9) {
+    constructor(size = 19) {
         this.size = size;
-        this.board = [];
-        this.currentPlayer = 1;
-        this.history = [];
-        this.previousBoardHash = null;
-        this.passCount = 0;
-        this.blackCaptures = 0;
-        this.whiteCaptures = 0;
+        this.totalSize = size * size;
         this.initBoard();
     }
 
     initBoard() {
-        this.board = [];
-        for (let i = 0; i < this.size; i++) {
-            this.board[i] = [];
-            for (let j = 0; j < this.size; j++) {
-                this.board[i][j] = 0;
-            }
-        }
+        // 使用Int8Array提升性能: 0=空, 1=黑, 2=白
+        this.board = new Int8Array(this.totalSize);
         this.currentPlayer = 1;
         this.history = [];
         this.previousBoardHash = null;
         this.passCount = 0;
         this.blackCaptures = 0;
         this.whiteCaptures = 0;
+        this.moveCount = 0;
+    }
+
+    idx(row, col) {
+        return row * this.size + col;
     }
 
     getState() {
         return {
-            board: this.board.map(row => [...row]),
+            board: Array.from(this.board),
             currentPlayer: this.currentPlayer,
             blackCaptures: this.blackCaptures,
             whiteCaptures: this.whiteCaptures,
             passCount: this.passCount,
-            history: [...this.history]
+            moveCount: this.moveCount
         };
     }
 
     setState(state) {
-        this.board = state.board.map(row => [...row]);
+        this.board = new Int8Array(state.board);
         this.currentPlayer = state.currentPlayer;
         this.blackCaptures = state.blackCaptures;
         this.whiteCaptures = state.whiteCaptures;
         this.passCount = state.passCount;
-        this.history = [...state.history];
-        this.previousBoardHash = this.history.length > 0 ? this.getBoardHash(this.history[this.history.length - 1].board) : null;
+        this.moveCount = state.moveCount || 0;
+        this.previousBoardHash = this.history.length > 0
+            ? this.hashBoard(new Int8Array(this.history[this.history.length - 1].board))
+            : null;
     }
 
     clone() {
         const clone = new GoBoard(this.size);
-        clone.setState(this.getState());
+        clone.board = new Int8Array(this.board);
+        clone.currentPlayer = this.currentPlayer;
+        clone.blackCaptures = this.blackCaptures;
+        clone.whiteCaptures = this.whiteCaptures;
+        clone.passCount = this.passCount;
+        clone.moveCount = this.moveCount;
+        clone.previousBoardHash = this.previousBoardHash;
+        clone.history = this.history.map(h => ({ ...h, board: Array.from(h.board) }));
         return clone;
     }
 
-    getBoardHash(board) {
+    hashBoard(board) {
         let hash = '';
-        for (let i = 0; i < this.size; i++) {
-            for (let j = 0; j < this.size; j++) {
-                hash += board[i][j].toString();
-            }
+        for (let i = 0; i < this.totalSize; i++) {
+            hash += board[i];
         }
         return hash;
     }
 
-    isValidMove(row, col) {
-        if (row < 0 || row >= this.size || col < 0 || col >= this.size) {
-            return false;
-        }
-        if (this.board[row][col] !== 0) {
-            return false;
-        }
+    // 获取相邻位置的索引
+    getNeighbors(idx) {
+        const neighbors = [];
+        const row = Math.floor(idx / this.size);
+        const col = idx % this.size;
+        if (row > 0) neighbors.push(idx - this.size);
+        if (row < this.size - 1) neighbors.push(idx + this.size);
+        if (col > 0) neighbors.push(idx - 1);
+        if (col < this.size - 1) neighbors.push(idx + 1);
+        return neighbors;
+    }
 
-        const testBoard = this.board.map(r => [...r]);
-        testBoard[row][col] = this.currentPlayer;
+    // 查找一个棋子所在的连通组及其气数
+    findGroupAndLiberties(board, idx) {
+        const color = board[idx];
+        if (color === 0) return { group: [], liberties: 0 };
 
-        const captured = this.findCapturedStones(testBoard, 3 - this.currentPlayer);
-        if (captured.length > 0) {
-            for (const [cr, cc] of captured) {
-                testBoard[cr][cc] = 0;
+        const group = [];
+        const visited = new Set();
+        const libertySet = new Set();
+        const stack = [idx];
+
+        while (stack.length > 0) {
+            const cur = stack.pop();
+            if (visited.has(cur)) continue;
+            visited.add(cur);
+            group.push(cur);
+
+            const neighbors = this.getNeighbors(cur);
+            for (const n of neighbors) {
+                if (board[n] === 0) {
+                    libertySet.add(n);
+                } else if (board[n] === color && !visited.has(n)) {
+                    stack.push(n);
+                }
             }
         }
 
-        if (!this.hasLiberties(testBoard, row, col)) {
-            return false;
+        return { group, liberties: libertySet.size };
+    }
+
+    isValidMove(row, col) {
+        if (row < 0 || row >= this.size || col < 0 || col >= this.size) return false;
+        const i = this.idx(row, col);
+        if (this.board[i] !== 0) return false;
+
+        const testBoard = new Int8Array(this.board);
+        testBoard[i] = this.currentPlayer;
+        const opponent = 3 - this.currentPlayer;
+
+        // 只检查相邻的对方棋子组是否被提
+        let captured = 0;
+        const neighbors = this.getNeighbors(i);
+        const checked = new Set();
+        for (const n of neighbors) {
+            if (testBoard[n] === opponent && !checked.has(n)) {
+                const { group, liberties } = this.findGroupAndLiberties(testBoard, n);
+                group.forEach(g => checked.add(g));
+                if (liberties === 0) {
+                    captured += group.length;
+                    for (const g of group) testBoard[g] = 0;
+                }
+            }
         }
 
-        const newHash = this.getBoardHash(testBoard);
-        if (newHash === this.previousBoardHash) {
-            return false;
+        // 自杀规则
+        const { liberties: myLiberties } = this.findGroupAndLiberties(testBoard, i);
+        if (myLiberties === 0 && captured === 0) return false;
+
+        // 劫争检查 - 仅在恰好提1子时才需要检查（劫争只在这种情况发生）
+        if (captured === 1 && this.previousBoardHash !== null) {
+            const newHash = this.hashBoard(testBoard);
+            if (newHash === this.previousBoardHash) return false;
         }
 
         return true;
@@ -96,138 +146,118 @@ class GoBoard {
 
     getValidMoves() {
         const moves = [];
-        for (let i = 0; i < this.size; i++) {
-            for (let j = 0; j < this.size; j++) {
-                if (this.isValidMove(i, j)) {
-                    moves.push([i, j]);
+        for (let row = 0; row < this.size; row++) {
+            for (let col = 0; col < this.size; col++) {
+                const i = this.idx(row, col);
+                if (this.board[i] === 0 && this.isValidMove(row, col)) {
+                    moves.push([row, col]);
                 }
             }
         }
         return moves;
     }
 
-    findGroup(board, row, col) {
-        const color = board[row][col];
-        if (color === 0) return [];
-
-        const group = [];
-        const visited = new Set();
-        const stack = [[row, col]];
-
-        while (stack.length > 0) {
-            const [r, c] = stack.pop();
-            const key = `${r},${c}`;
-            
-            if (visited.has(key)) continue;
-            if (r < 0 || r >= this.size || c < 0 || c >= this.size) continue;
-            if (board[r][c] !== color) continue;
-
-            visited.add(key);
-            group.push([r, c]);
-
-            stack.push([r - 1, c]);
-            stack.push([r + 1, c]);
-            stack.push([r, c - 1]);
-            stack.push([r, c + 1]);
+    // 快速获取有效落子 - 包含已有棋子周围2格范围内的空位
+    getValidMovesFast() {
+        // 开局阶段（前10步）允许全盘落子
+        if (this.moveCount < 10) {
+            const moves = [];
+            for (let row = 0; row < this.size; row++) {
+                for (let col = 0; col < this.size; col++) {
+                    if (this.board[this.idx(row, col)] === 0 && this.isValidMove(row, col)) {
+                        moves.push([row, col]);
+                    }
+                }
+            }
+            return moves;
         }
 
-        return group;
-    }
-
-    getLiberties(board, row, col) {
-        const group = this.findGroup(board, row, col);
-        const liberties = new Set();
-
-        for (const [r, c] of group) {
-            const neighbors = [
-                [r - 1, c], [r + 1, c],
-                [r, c - 1], [r, c + 1]
-            ];
-
-            for (const [nr, nc] of neighbors) {
-                if (nr >= 0 && nr < this.size && nc >= 0 && nc < this.size) {
-                    if (board[nr][nc] === 0) {
-                        liberties.add(`${nr},${nc}`);
+        // 中盘只检查已有棋子周围2格范围
+        const candidates = new Set();
+        for (let i = 0; i < this.totalSize; i++) {
+            if (this.board[i] !== 0) {
+                const row = Math.floor(i / this.size);
+                const col = i % this.size;
+                // 检查周围2格
+                for (let dr = -2; dr <= 2; dr++) {
+                    for (let dc = -2; dc <= 2; dc++) {
+                        const nr = row + dr;
+                        const nc = col + dc;
+                        if (nr >= 0 && nr < this.size && nc >= 0 && nc < this.size) {
+                            const ni = this.idx(nr, nc);
+                            if (this.board[ni] === 0) candidates.add(ni);
+                        }
                     }
                 }
             }
         }
 
-        return liberties.size;
-    }
-
-    hasLiberties(board, row, col) {
-        return this.getLiberties(board, row, col) > 0;
-    }
-
-    findCapturedStones(board, color) {
-        const captured = [];
-        const checked = new Set();
-
-        for (let i = 0; i < this.size; i++) {
-            for (let j = 0; j < this.size; j++) {
-                if (board[i][j] === color) {
-                    const key = `${i},${j}`;
-                    if (checked.has(key)) continue;
-
-                    const group = this.findGroup(board, i, j);
-                    group.forEach(([r, c]) => checked.add(`${r},${c}`));
-
-                    if (!this.hasLiberties(board, i, j)) {
-                        captured.push(...group);
-                    }
-                }
+        const moves = [];
+        for (const i of candidates) {
+            const row = Math.floor(i / this.size);
+            const col = i % this.size;
+            if (this.isValidMove(row, col)) {
+                moves.push([row, col]);
             }
         }
-
-        return captured;
+        return moves;
     }
 
     makeMove(row, col) {
-        if (!this.isValidMove(row, col)) {
-            return false;
-        }
+        if (!this.isValidMove(row, col)) return false;
 
+        // 保存历史
         this.history.push({
-            board: this.board.map(r => [...r]),
+            board: Array.from(this.board),
             currentPlayer: this.currentPlayer,
             blackCaptures: this.blackCaptures,
             whiteCaptures: this.whiteCaptures,
-            passCount: this.passCount
+            passCount: this.passCount,
+            moveCount: this.moveCount
         });
 
-        this.board[row][col] = this.currentPlayer;
+        const i = this.idx(row, col);
+        this.board[i] = this.currentPlayer;
+        const opponent = 3 - this.currentPlayer;
 
-        const captured = this.findCapturedStones(this.board, 3 - this.currentPlayer);
-        for (const [cr, cc] of captured) {
-            this.board[cr][cc] = 0;
+        // 提子
+        const neighbors = this.getNeighbors(i);
+        const checked = new Set();
+        let totalCaptured = 0;
+        for (const n of neighbors) {
+            if (this.board[n] === opponent && !checked.has(n)) {
+                const { group, liberties } = this.findGroupAndLiberties(this.board, n);
+                group.forEach(g => checked.add(g));
+                if (liberties === 0) {
+                    for (const g of group) this.board[g] = 0;
+                    totalCaptured += group.length;
+                }
+            }
         }
 
-        if (this.currentPlayer === 1) {
-            this.blackCaptures += captured.length;
-        } else {
-            this.whiteCaptures += captured.length;
-        }
+        if (this.currentPlayer === 1) this.blackCaptures += totalCaptured;
+        else this.whiteCaptures += totalCaptured;
 
-        this.previousBoardHash = this.getBoardHash(this.history[this.history.length - 1].board);
-        this.currentPlayer = 3 - this.currentPlayer;
+        this.previousBoardHash = this.hashBoard(new Int8Array(this.history[this.history.length - 1].board));
+        this.currentPlayer = opponent;
         this.passCount = 0;
+        this.moveCount++;
 
         return true;
     }
 
     pass() {
         this.history.push({
-            board: this.board.map(r => [...r]),
+            board: Array.from(this.board),
             currentPlayer: this.currentPlayer,
             blackCaptures: this.blackCaptures,
             whiteCaptures: this.whiteCaptures,
-            passCount: this.passCount
+            passCount: this.passCount,
+            moveCount: this.moveCount
         });
-
         this.currentPlayer = 3 - this.currentPlayer;
         this.passCount++;
-
+        this.moveCount++;
         return true;
     }
 
@@ -237,7 +267,7 @@ class GoBoard {
 
     calculateScore() {
         const territory = this.calculateTerritory();
-        const blackScore = territory.black + this.blackCaptures + 6.5;
+        const blackScore = territory.black + this.blackCaptures + 6.5; // 贴目6.5
         const whiteScore = territory.white + this.whiteCaptures;
         return { black: blackScore, white: whiteScore };
     }
@@ -247,40 +277,29 @@ class GoBoard {
         let blackTerritory = 0;
         let whiteTerritory = 0;
 
-        for (let i = 0; i < this.size; i++) {
-            for (let j = 0; j < this.size; j++) {
-                if (this.board[i][j] === 0 && !visited.has(`${i},${j}`)) {
-                    const emptyGroup = [];
-                    const borders = new Set();
-                    const stack = [[i, j]];
+        for (let i = 0; i < this.totalSize; i++) {
+            if (this.board[i] === 0 && !visited.has(i)) {
+                const emptyGroup = [];
+                const borders = new Set();
+                const stack = [i];
 
-                    while (stack.length > 0) {
-                        const [r, c] = stack.pop();
-                        const key = `${r},${c}`;
-
-                        if (visited.has(key)) continue;
-                        if (r < 0 || r >= this.size || c < 0 || c >= this.size) continue;
-
-                        if (this.board[r][c] === 0) {
-                            visited.add(key);
-                            emptyGroup.push([r, c]);
-                            stack.push([r - 1, c]);
-                            stack.push([r + 1, c]);
-                            stack.push([r, c - 1]);
-                            stack.push([r, c + 1]);
-                        } else {
-                            borders.add(this.board[r][c]);
-                        }
+                while (stack.length > 0) {
+                    const cur = stack.pop();
+                    if (visited.has(cur)) continue;
+                    if (this.board[cur] !== 0) {
+                        borders.add(this.board[cur]);
+                        continue;
                     }
+                    visited.add(cur);
+                    emptyGroup.push(cur);
+                    const neighbors = this.getNeighbors(cur);
+                    for (const n of neighbors) stack.push(n);
+                }
 
-                    if (borders.size === 1) {
-                        const owner = borders.values().next().value;
-                        if (owner === 1) {
-                            blackTerritory += emptyGroup.length;
-                        } else {
-                            whiteTerritory += emptyGroup.length;
-                        }
-                    }
+                if (borders.size === 1) {
+                    const owner = borders.values().next().value;
+                    if (owner === 1) blackTerritory += emptyGroup.length;
+                    else whiteTerritory += emptyGroup.length;
                 }
             }
         }

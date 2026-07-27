@@ -234,6 +234,36 @@ header h1 {
     color: #00ff88;
 }
 
+.speed-control {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.speed-control label {
+    display: inline-block;
+    margin-right: 10px;
+    color: #aaa;
+}
+
+.speed-control input[type="range"] {
+    width: 150px;
+    vertical-align: middle;
+}
+
+.speed-control span {
+    display: inline-block;
+    margin-left: 10px;
+    color: #00d2ff;
+    font-weight: bold;
+    min-width: 20px;
+}
+
+.control-panel button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
 @media (max-width: 1000px) {
     #main-content {
         grid-template-columns: 1fr;
