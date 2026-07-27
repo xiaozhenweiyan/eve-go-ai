@@ -11,58 +11,81 @@
         <header>
             <h1>Eve - Self-Learning Go AI</h1>
             <div id="mode-select">
-                <button id="btn-training" class="mode-btn active">开始训练</button>
+                <button id="btn-training" class="mode-btn active">进化训练</button>
                 <button id="btn-play" class="mode-btn">人机对战</button>
             </div>
         </header>
 
         <div id="main-content">
             <div id="board-container">
-                <canvas id="go-board" width="600" height="600"></canvas>
+                <div class="dual-boards">
+                    <div class="board-panel">
+                        <h3 id="board-a-title">G3 (新生代) 执黑</h3>
+                        <canvas id="go-board-a" width="420" height="420"></canvas>
+                        <div class="board-score">
+                            <span>黑: <b id="black-score-a">0</b></span>
+                            <span>白: <b id="white-score-a">0</b></span>
+                        </div>
+                        <div class="board-label" id="match-type-a">G3 vs G2</div>
+                    </div>
+                    <div class="board-panel">
+                        <h3 id="board-b-title">G2 (变异体) 执白</h3>
+                        <canvas id="go-board-b" width="420" height="420"></canvas>
+                        <div class="board-score">
+                            <span>黑: <b id="black-score-b">0</b></span>
+                            <span>白: <b id="white-score-b">0</b></span>
+                        </div>
+                        <div class="board-label" id="match-type-b">G3 vs G2-Mutant</div>
+                    </div>
+                </div>
+
                 <div id="game-info">
                     <div class="info-row">
-                        <span class="label">当前回合:</span>
-                        <span id="current-player">黑方</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="label">黑方得分:</span>
-                        <span id="black-score">0</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="label">白方得分:</span>
-                        <span id="white-score">0</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="label">训练代数:</span>
+                        <span class="label">进化代数:</span>
                         <span id="generation">0</span>
                     </div>
                     <div class="info-row">
-                        <span class="label">训练进度:</span>
-                        <span id="progress">0%</span>
+                        <span class="label">遗传代数:</span>
+                        <span id="evo-generation">0 / 10</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">已对战:</span>
+                        <span id="games-played">0</span>
                     </div>
                     <div class="info-row">
                         <span class="label">当前手数:</span>
                         <span id="move-count">0</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">G3胜率:</span>
+                        <span id="g3-win-rate">0%</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">最佳模型:</span>
+                        <span id="best-model">G2</span>
                     </div>
                 </div>
             </div>
 
             <div id="controls">
                 <div id="training-controls" class="control-panel">
-                    <button id="btn-start-training">开始训练</button>
-                    <button id="btn-stop-training" disabled>停止训练</button>
+                    <button id="btn-start-training">开始进化</button>
+                    <button id="btn-stop-training" disabled>停止进化</button>
                     <button id="btn-load-model">加载模型</button>
                     <button id="btn-save-model">保存模型</button>
                     <div class="control-info">
-                        <p>训练状态: <span id="training-status">空闲</span></p>
-                        <p>已对战次数: <span id="games-played">0</span></p>
-                        <p>最近胜率: <span id="win-rate">0%</span></p>
-                        <p>当前对局: <span id="current-game">无</span></p>
+                        <p>状态: <span id="training-status">空闲</span></p>
+                        <p>阶段: <span id="phase-status">等待开始</span></p>
                     </div>
                     <div class="speed-control">
-                        <label for="speed-slider">训练速度:</label>
+                        <label for="speed-slider">速度:</label>
                         <input type="range" id="speed-slider" min="1" max="10" value="5">
                         <span id="speed-value">5</span>
+                    </div>
+                    <div class="genetic-settings">
+                        <label>变异率:
+                            <input type="number" id="mutation-rate" value="15" min="1" max="50"> %
+                        </label>
                     </div>
                 </div>
 
@@ -76,19 +99,27 @@
                         <option value="hard">困难</option>
                     </select>
                 </div>
+
+                <div id="model-panel" class="control-panel">
+                    <h4>模型排行</h4>
+                    <div id="model-ranking">
+                        <div class="rank-item"><span class="rank">1</span><span class="name">G2</span><span class="score">0</span></div>
+                        <div class="rank-item"><span class="rank">2</span><span class="name">G1</span><span class="score">0</span></div>
+                    </div>
+                </div>
             </div>
 
             <div id="visualization">
-                <h3>训练可视化</h3>
-                <canvas id="chart-canvas" width="800" height="300"></canvas>
+                <h3>进化可视化</h3>
+                <canvas id="chart-canvas" width="900" height="300"></canvas>
                 <div id="training-log">
-                    <h4>训练日志</h4>
+                    <h4>进化日志</h4>
                     <div id="log-content"></div>
                 </div>
             </div>
 
             <div id="upload-section">
-                <h3>模型上传</h3>
+                <h3>模型上传 / 下载</h3>
                 <input type="file" id="model-upload" accept=".json">
                 <button id="btn-upload-model">上传模型</button>
                 <p id="upload-status"></p>
@@ -98,6 +129,7 @@
 
     <script src="js/go.js"></script>
     <script src="js/mcts.js"></script>
+    <script src="js/genetic.js"></script>
     <script src="js/trainer.js"></script>
     <script src="js/ui.js"></script>
 </body>

@@ -308,9 +308,29 @@ class PolicyNetwork {
         return validMoves[bestIdx];
     }
 
+    // 从最终结果直接学习（简单版，不需要每步记录）
+    learnFromResult(isWin) {
+        const reward = isWin ? 1 : -0.5;
+        const lr = this.learningRate;
+
+        // 调整所有权重的基准水平
+        const keys = Object.keys(this.weights);
+        for (const key of keys) {
+            // 轻微扰动，胜负会影响不同特征的权重
+            const noise = (Math.random() - 0.3) * lr * reward * 0.1;
+            this.weights[key] += noise;
+            // 权重裁剪
+            this.weights[key] = Math.max(-5, Math.min(5, this.weights[key]));
+        }
+    }
+
     // 强化学习奖励更新 - 核心训练算法
     applyReward(gameMoves, winner) {
-        if (gameMoves.length === 0) return;
+        if (gameMoves.length === 0) {
+            // 没有步记录时使用简化版学习
+            this.learnFromResult(winner === 1);
+            return;
+        }
 
         const gamma = 0.95; // 折扣因子
         const moveCount = gameMoves.length;
