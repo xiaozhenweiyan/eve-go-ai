@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eve - 自学习围棋AI</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>Eve - Self-Learning Go AI</h1>
+            <div id="mode-select">
+                <button id="btn-training" class="mode-btn active">开始训练</button>
+                <button id="btn-play" class="mode-btn">人机对战</button>
+            </div>
+        </header>
+
+        <div id="main-content">
+            <div id="board-container">
+                <canvas id="go-board" width="500" height="500"></canvas>
+                <div id="game-info">
+                    <div class="info-row">
+                        <span class="label">当前回合:</span>
+                        <span id="current-player">黑方</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">黑方得分:</span>
+                        <span id="black-score">0</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">白方得分:</span>
+                        <span id="white-score">0</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">训练代数:</span>
+                        <span id="generation">0</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">训练进度:</span>
+                        <span id="progress">0%</span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="controls">
+                <div id="training-controls" class="control-panel">
+                    <button id="btn-start-training">开始训练</button>
+                    <button id="btn-stop-training">停止训练</button>
+                    <button id="btn-load-model">加载模型</button>
+                    <button id="btn-save-model">保存模型</button>
+                    <div class="control-info">
+                        <p>训练进行中: <span id="training-status">否</span></p>
+                        <p>已对战次数: <span id="games-played">0</span></p>
+                        <p>最近10局胜率: <span id="win-rate">0%</span></p>
+                    </div>
+                </div>
+
+                <div id="play-controls" class="control-panel hidden">
+                    <button id="btn-reset-game">重新开始</button>
+                    <button id="btn-pass">跳过回合</button>
+                    <button id="btn-ai-move">AI落子</button>
+                    <select id="difficulty-select">
+                        <option value="easy">简单</option>
+                        <option value="medium" selected>中等</option>
+                        <option value="hard">困难</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="visualization">
+                <h3>训练可视化</h3>
+                <canvas id="chart-canvas" width="600" height="300"></canvas>
+                <div id="training-log">
+                    <h4>训练日志</h4>
+                    <div id="log-content"></div>
+                </div>
+            </div>
+
+            <div id="upload-section">
+                <h3>模型上传</h3>
+                <input type="file" id="model-upload" accept=".json">
+                <button id="btn-upload-model">上传模型</button>
+                <p id="upload-status"></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/go.js"></script>
+    <script src="js/mcts.js"></script>
+    <script src="js/trainer.js"></script>
+    <script src="js/ui.js"></script>
+</body>
+</html>
