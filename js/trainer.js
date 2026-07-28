@@ -165,14 +165,14 @@ class EveTrainer {
         return idx;
     }
 
-    // 检查是否应该投子认输
+    // 检查是否应该投子认输（每20步检查一次以节省性能）
     shouldResign(board) {
         if (board.moveCount < 60) return false;
+        if (board.moveCount % 20 !== 0) return false;
         const score = board.calculateScore();
         const diff = board.currentPlayer === 1
             ? score.white - score.black
             : score.black - score.white;
-        // 落后超过35目且棋局已过60手，认输
         return diff > 35;
     }
 
@@ -287,7 +287,7 @@ class EveTrainer {
 
             board.makeMove(move[0], move[1]);
 
-            if (step % 10 === 0) await new Promise(r => setTimeout(r, 0));
+            if (step % 20 === 0) await new Promise(r => setTimeout(r, 0));
         }
 
         let winner;
