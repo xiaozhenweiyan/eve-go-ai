@@ -729,6 +729,7 @@ class PolicyNetwork {
         // 过滤掉填眼和在己方腹地无意义落子（除非所有落子都是）
         const nonEyeFillMoves = [];
         const nonEyeFillScores = [];
+        const boardArr = board.board;
         for (let i = 0; i < validMoves.length; i++) {
             const move = validMoves[i];
             const mi = board.idx(move[0], move[1]);
