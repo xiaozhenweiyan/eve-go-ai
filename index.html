@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Eve - 自学习围棋AI</title>
+    <title>Eve - 200 AI 进化围棋</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
     <div id="app">
         <header>
-            <h1>Eve - Self-Learning Go AI</h1>
+            <h1>Eve - 200 AI 进化围棋系统</h1>
             <div id="mode-select">
                 <button id="btn-training" class="mode-btn active">进化训练</button>
                 <button id="btn-play" class="mode-btn">人机对战</button>
@@ -17,75 +17,58 @@
         </header>
 
         <div id="main-content">
-            <div id="board-container">
+            <!-- 左侧：双棋盘 + 信息 -->
+            <div id="board-area">
                 <div class="dual-boards">
-                    <div class="board-panel">
-                        <h3 id="board-a-title">G3 (新生代) 执黑</h3>
+                    <div class="board-panel" id="panel-a">
+                        <h3 id="board-a-title">精选对局 (Top / 选定AI)</h3>
                         <canvas id="go-board-a" width="420" height="420"></canvas>
                         <div class="board-score">
-                            <span>黑: <b id="black-score-a">0</b></span>
-                            <span>白: <b id="white-score-a">0</b></span>
+                            <span>黑(<b id="black-name-a">--</b>): <b id="black-score-a">0</b></span>
+                            <span>白(<b id="white-name-a">--</b>): <b id="white-score-a">0</b></span>
                         </div>
-                        <div class="board-label" id="match-type-a">G3 vs G2</div>
+                        <div class="board-label" id="match-info-a">等待开始...</div>
                     </div>
-                    <div class="board-panel">
-                        <h3 id="board-b-title">G2 (变异体) 执白</h3>
+                    <div class="board-panel" id="panel-b">
+                        <h3 id="board-b-title">Top 胜率对决</h3>
                         <canvas id="go-board-b" width="420" height="420"></canvas>
                         <div class="board-score">
-                            <span>黑: <b id="black-score-b">0</b></span>
-                            <span>白: <b id="white-score-b">0</b></span>
+                            <span>黑(<b id="black-name-b">--</b>): <b id="black-score-b">0</b></span>
+                            <span>白(<b id="white-name-b">--</b>): <b id="white-score-b">0</b></span>
                         </div>
-                        <div class="board-label" id="match-type-b">G3 vs G2-Mutant</div>
+                        <div class="board-label" id="match-info-b">最高胜率AI对战</div>
                     </div>
                 </div>
 
-                <div id="game-info">
-                    <div class="info-row">
-                        <span class="label">进化代数:</span>
-                        <span id="generation">0</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="label">遗传代数:</span>
-                        <span id="evo-generation">0 / 10</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="label">已对战:</span>
-                        <span id="games-played">0</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="label">当前手数:</span>
-                        <span id="move-count">0</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="label">G3胜率:</span>
-                        <span id="g3-win-rate">0%</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="label">最佳模型:</span>
-                        <span id="best-model">G2</span>
-                    </div>
+                <div id="watch-control">
+                    <label>选定AI观看:</label>
+                    <select id="watch-ai">
+                        <option value="">-- 自动 (Top胜率) --</option>
+                    </select>
+                    <span id="watch-status">自动模式 (Top胜率)</span>
                 </div>
             </div>
 
-            <div id="controls">
+            <!-- 右侧：控制 + 排行榜 -->
+            <div id="sidebar">
                 <div id="training-controls" class="control-panel">
                     <button id="btn-start-training">开始进化</button>
                     <button id="btn-stop-training" disabled>停止进化</button>
-                    <button id="btn-load-model">加载模型</button>
+                    <button id="btn-pause-training" disabled>暂停</button>
                     <button id="btn-save-model">保存模型</button>
                     <div class="control-info">
                         <p>状态: <span id="training-status">空闲</span></p>
-                        <p>阶段: <span id="phase-status">等待开始</span></p>
+                        <p>总对局: <span id="total-games">0</span></p>
+                        <p>当前代: <span id="generation">0</span></p>
                     </div>
                     <div class="speed-control">
-                        <label for="speed-slider">速度:</label>
+                        <label>速度:</label>
                         <input type="range" id="speed-slider" min="1" max="10" value="5">
                         <span id="speed-value">5</span>
                     </div>
                     <div class="genetic-settings">
-                        <label>变异率:
-                            <input type="number" id="mutation-rate" value="15" min="1" max="50"> %
-                        </label>
+                        <label>种群: 200</label>
+                        <label>进化间隔: 每10局</label>
                     </div>
                 </div>
 
@@ -100,18 +83,29 @@
                     </select>
                 </div>
 
-                <div id="model-panel" class="control-panel">
-                    <h4>模型排行</h4>
-                    <div id="model-ranking">
-                        <div class="rank-item"><span class="rank">1</span><span class="name">G2</span><span class="score">0</span></div>
-                        <div class="rank-item"><span class="rank">2</span><span class="name">G1</span><span class="score">0</span></div>
+                <div id="leaderboard-panel" class="control-panel">
+                    <h4>AI 排行榜 (Top 20)</h4>
+                    <div id="leaderboard">
+                        <div class="leaderboard-header">
+                            <span>排名</span>
+                            <span>名称</span>
+                            <span>胜率</span>
+                            <span>对局</span>
+                        </div>
+                        <div id="leaderboard-body"></div>
                     </div>
                 </div>
             </div>
 
+            <!-- 底部：可视化 + 日志 -->
             <div id="visualization">
-                <h3>进化可视化</h3>
-                <canvas id="chart-canvas" width="900" height="300"></canvas>
+                <h3>200 AI 胜率分布</h3>
+                <canvas id="chart-canvas" width="900" height="320"></canvas>
+                <div id="chart-legend">
+                    <span class="legend-item"><span class="dot" style="background:#00d2ff"></span> Top 10</span>
+                    <span class="legend-item"><span class="dot" style="background:rgba(255,255,255,0.3)"></span> 其他</span>
+                    <span class="legend-item"><span class="dot" style="background:#ffaa00"></span> 平均值</span>
+                </div>
                 <div id="training-log">
                     <h4>进化日志</h4>
                     <div id="log-content"></div>
@@ -119,9 +113,10 @@
             </div>
 
             <div id="upload-section">
-                <h3>模型上传 / 下载</h3>
+                <h3>模型上传</h3>
                 <input type="file" id="model-upload" accept=".json">
-                <button id="btn-upload-model">上传模型</button>
+                <button id="btn-upload-model">上传</button>
+                <button id="btn-load-model">加载本地</button>
                 <p id="upload-status"></p>
             </div>
         </div>

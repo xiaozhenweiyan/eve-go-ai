@@ -8,7 +8,7 @@ class GoUI {
         this.chartCanvas = document.getElementById('chart-canvas');
         this.chartCtx = this.chartCanvas.getContext('2d');
 
-        this.trainer = new EveTrainer(this.boardSize);
+        this.trainer = new EveTrainer(this.boardSize, 200);
         this.mode = 'training';
         this.playerColor = 1;
         this.gameBoard = new GoBoard(this.boardSize);
@@ -18,10 +18,6 @@ class GoUI {
         this.offset = 20;
         this.stoneRadius = 9;
 
-        // 人机对战用的单棋盘（隐藏的canvas引用，复用draw逻辑）
-        this.singleBoardCanvas = this.canvasA;
-        this.singleBoardCtx = this.ctxA;
-
         this.init();
     }
 
@@ -29,9 +25,10 @@ class GoUI {
         this.setupEventListeners();
         this.drawEmptyBoard(this.ctxA);
         this.drawEmptyBoard(this.ctxB);
+        this.populateAiSelect();
         this.loadLatestModel();
         this.drawChart();
-        this.log('Eve 进化系统已就绪 (19x19)', 'info');
+        this.log('Eve 200 AI 进化系统已就绪', 'info');
     }
 
     setupEventListeners() {
@@ -45,7 +42,7 @@ class GoUI {
         // 训练控制
         document.getElementById('btn-start-training').addEventListener('click', () => this.startTraining());
         document.getElementById('btn-stop-training').addEventListener('click', () => this.stopTraining());
-        document.getElementById('btn-load-model').addEventListener('click', () => this.loadModel());
+        document.getElementById('btn-pause-training').addEventListener('click', () => this.pauseTraining());
         document.getElementById('btn-save-model').addEventListener('click', () => this.saveModel());
 
         // 对战控制
@@ -61,17 +58,37 @@ class GoUI {
             this.trainer.setSpeed(speed);
         });
 
-        // 变异率设置
-        const mutationInput = document.getElementById('mutation-rate');
-        mutationInput.addEventListener('change', (e) => {
-            const rate = parseInt(e.target.value);
-            this.trainer.setMutationRate(rate);
-            this.log(`变异率设置为 ${rate}%`, 'info');
+        // AI选择下拉框
+        document.getElementById('watch-ai').addEventListener('change', (e) => {
+            const val = e.target.value;
+            if (val !== '') {
+                const idx = parseInt(val);
+                this.trainer.setWatchedAi(idx);
+                document.getElementById('watch-status').textContent =
+                    `观看: ${this.trainer.population[idx].name}`;
+                this.log(`已选定观看 AI: ${this.trainer.population[idx].name}`, 'info');
+            } else {
+                this.trainer.setWatchedAi(-1);
+                document.getElementById('watch-status').textContent = '自动模式 (Top胜率)';
+                this.log('已切换到自动观看模式', 'info');
+            }
         });
 
-        // 上传
+        // 上传/加载
         document.getElementById('model-upload').addEventListener('change', (e) => this.handleFileUpload(e));
         document.getElementById('btn-upload-model').addEventListener('click', () => this.uploadModel());
+        document.getElementById('btn-load-model').addEventListener('click', () => this.loadModel());
+    }
+
+    populateAiSelect() {
+        const select = document.getElementById('watch-ai');
+        select.innerHTML = '<option value="">-- 自动 (Top胜率) --</option>';
+        for (let i = 0; i < this.trainer.populationSize; i++) {
+            const opt = document.createElement('option');
+            opt.value = i;
+            opt.textContent = this.trainer.population[i].name;
+            select.appendChild(opt);
+        }
     }
 
     switchMode(mode) {
@@ -84,27 +101,24 @@ class GoUI {
         document.getElementById('btn-play').classList.toggle('active', mode === 'play');
         document.getElementById('training-controls').classList.toggle('hidden', mode !== 'training');
         document.getElementById('play-controls').classList.toggle('hidden', mode !== 'play');
+        document.getElementById('leaderboard-panel').classList.toggle('hidden', mode !== 'training');
 
         if (mode === 'play') {
-            // 切换到单棋盘模式（使用canvasA）
-            document.querySelector('.dual-boards').style.flexDirection = 'column';
-            this.canvasB.style.display = 'none';
-            document.querySelector('#board-b-title').parentElement.style.display = 'none';
             this.canvasA.width = 600;
             this.canvasA.height = 600;
+            this.canvasB.parentElement.style.display = 'none';
+            document.getElementById('watch-control').style.display = 'none';
             this.cellSize = 30;
             this.offset = 30;
             this.stoneRadius = 13;
             this.resetGame();
         } else {
-            // 双棋盘模式
-            document.querySelector('.dual-boards').style.flexDirection = 'row';
-            this.canvasB.style.display = 'block';
-            document.querySelector('#board-b-title').parentElement.style.display = 'flex';
             this.canvasA.width = 420;
             this.canvasA.height = 420;
             this.canvasB.width = 420;
             this.canvasB.height = 420;
+            this.canvasB.parentElement.style.display = 'flex';
+            document.getElementById('watch-control').style.display = 'flex';
             this.cellSize = 20;
             this.offset = 20;
             this.stoneRadius = 9;
@@ -118,7 +132,6 @@ class GoUI {
         const size = this.boardSize;
         const canvas = ctx.canvas;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-
         const bgGrad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
         bgGrad.addColorStop(0, '#dcb35c');
         bgGrad.addColorStop(1, '#c9a040');
@@ -138,8 +151,6 @@ class GoUI {
             ctx.lineTo(pos, this.offset + (size - 1) * this.cellSize);
             ctx.stroke();
         }
-
-        // 星位
         const stars = [[3,3],[3,9],[3,15],[9,3],[9,9],[9,15],[15,3],[15,9],[15,15]];
         for (const [r, c] of stars) {
             const x = this.offset + c * this.cellSize;
@@ -156,9 +167,7 @@ class GoUI {
         for (let row = 0; row < this.boardSize; row++) {
             for (let col = 0; col < this.boardSize; col++) {
                 const stone = board.board[board.idx(row, col)];
-                if (stone !== 0) {
-                    this.drawStone(ctx, row, col, stone);
-                }
+                if (stone !== 0) this.drawStone(ctx, row, col, stone);
             }
         }
         if (lastMove) {
@@ -191,30 +200,26 @@ class GoUI {
         ctx.stroke();
     }
 
-    // ===== 训练相关 =====
+    // ===== 训练控制 =====
     async startTraining() {
-        const rate = parseInt(document.getElementById('mutation-rate').value);
-        this.trainer.setMutationRate(rate);
-
         document.getElementById('btn-start-training').disabled = true;
         document.getElementById('btn-stop-training').disabled = false;
+        document.getElementById('btn-pause-training').disabled = false;
         document.getElementById('training-status').textContent = '进化中';
-        document.getElementById('phase-status').textContent = '初始化...';
-        this.log('开始进化训练...', 'info');
+        this.log('200 AI 进化训练开始！', 'info');
 
-        // 设置回调
         this.trainer.onBoardUpdate = (data) => this.handleBoardUpdate(data);
-        this.trainer.onGameEnd = (data) => this.handleGameEnd(data);
-        this.trainer.onGenEnd = (data) => this.handleGenEnd(data);
-        this.trainer.onEvoEnd = (data) => this.handleEvoEnd(data);
+        this.trainer.onMatchEnd = (data) => this.handleMatchEnd(data);
+        this.trainer.onStatsUpdate = (stats) => this.handleStatsUpdate(stats);
         this.trainer.onLog = (msg, type) => this.log(msg, type);
 
         await this.trainer.startTraining();
 
         document.getElementById('btn-start-training').disabled = false;
         document.getElementById('btn-stop-training').disabled = true;
+        document.getElementById('btn-pause-training').disabled = true;
+        document.getElementById('btn-pause-training').textContent = '暂停';
         document.getElementById('training-status').textContent = '已停止';
-        document.getElementById('phase-status').textContent = '已停止';
         this.log('进化已停止', 'warning');
     }
 
@@ -222,77 +227,197 @@ class GoUI {
         this.trainer.stopTraining();
     }
 
+    pauseTraining() {
+        const paused = this.trainer.pauseTraining();
+        document.getElementById('btn-pause-training').textContent = paused ? '继续' : '暂停';
+        document.getElementById('training-status').textContent = paused ? '已暂停' : '进化中';
+        if (paused) {
+            this.log('训练已暂停，可以选定AI观看', 'info');
+        }
+    }
+
     handleBoardUpdate(data) {
-        if (data.boardA) {
+        // 棋盘A：精选对局（ watched AI 或 Top AI）
+        if (data.showcaseA && data.showcaseA.board) {
             const board = new GoBoard(this.boardSize);
-            board.setState(data.boardA);
+            board.setState(data.showcaseA.board);
             this.drawBoard(this.ctxA, board);
-            const score = board.calculateScore();
-            document.getElementById('black-score-a').textContent = score.black.toFixed(1);
-            document.getElementById('white-score-a').textContent = score.white.toFixed(1);
-            if (data.matchA) {
-                document.getElementById('match-type-a').textContent = data.matchA;
-            }
+            document.getElementById('black-name-a').textContent = data.showcaseA.blackName;
+            document.getElementById('white-name-a').textContent = data.showcaseA.whiteName;
+            document.getElementById('black-score-a').textContent = data.showcaseA.blackScore.toFixed(1);
+            document.getElementById('white-score-a').textContent = data.showcaseA.whiteScore.toFixed(1);
+            document.getElementById('match-info-a').textContent =
+                `${data.showcaseA.blackName} vs ${data.showcaseA.whiteName} 第${data.showcaseA.moveCount}手`;
         }
-        if (data.boardB) {
+
+        // 棋盘B：Top1 vs Top2 模拟对局
+        if (data.showcaseB && data.showcaseB.board) {
             const board = new GoBoard(this.boardSize);
-            board.setState(data.boardB);
+            board.setState(data.showcaseB.board);
             this.drawBoard(this.ctxB, board);
-            const score = board.calculateScore();
-            document.getElementById('black-score-b').textContent = score.black.toFixed(1);
-            document.getElementById('white-score-b').textContent = score.white.toFixed(1);
-            if (data.matchB) {
-                document.getElementById('match-type-b').textContent = data.matchB;
-            }
+            document.getElementById('black-name-b').textContent = data.showcaseB.blackName;
+            document.getElementById('white-name-b').textContent = data.showcaseB.whiteName;
+            document.getElementById('black-score-b').textContent = data.showcaseB.blackScore.toFixed(1);
+            document.getElementById('white-score-b').textContent = data.showcaseB.whiteScore.toFixed(1);
+            document.getElementById('match-info-b').textContent =
+                `${data.showcaseB.blackName} vs ${data.showcaseB.whiteName} 第${data.showcaseB.moveCount}手`;
         }
-        if (data.moveCount !== undefined) {
-            document.getElementById('move-count').textContent = data.moveCount;
-        }
-        if (data.currentMatch !== undefined) {
-            document.getElementById('phase-status').textContent = `对局 ${data.currentMatch}/2`;
-            // 高亮当前棋盘
-            document.querySelectorAll('.board-panel').forEach((el, i) => {
-                el.classList.toggle('active', i === data.currentMatch - 1);
-            });
-        }
+
+        document.getElementById('total-games').textContent = data.totalGames;
     }
 
-    handleGameEnd(data) {
-        document.getElementById('games-played').textContent = data.generation;
-        this.updateModelRanking();
+    handleMatchEnd(data) {
+        const prefix = data.isShowcase ? '[展示]' : '[后台]';
+        const w = data.winner === 1 ? data.black : data.winner === 2 ? data.white : '平局';
+        this.log(`${prefix} #${data.totalGames} ${data.black} vs ${data.white} -> ${w}`, 'info');
     }
 
-    handleGenEnd(data) {
-        document.getElementById('generation').textContent = data.generation;
-        document.getElementById('evo-generation').textContent = `${this.trainer.evoCycle} / 10`;
-        document.getElementById('g3-win-rate').textContent = `${Math.round(data.g3WinRate * 100)}%`;
-        document.getElementById('best-model').textContent = data.bestModel;
-        document.getElementById('games-played').textContent = data.totalGames;
-        document.getElementById('phase-status').textContent = '新代评估';
+    handleStatsUpdate(stats) {
+        document.getElementById('generation').textContent = stats.generation;
+        document.getElementById('total-games').textContent = stats.totalGames;
+        this.updateLeaderboard(stats.top10);
         this.drawChart();
-        this.updateModelRanking();
+        this.populateAiSelect();
     }
 
-    handleEvoEnd(data) {
-        this.log(`遗传进化完成！新适应度: ${data.bestFitness.toFixed(2)}`, 'success');
-        document.getElementById('phase-status').textContent = '遗传进化完成';
-        this.updateModelRanking();
-    }
-
-    updateModelRanking() {
-        const ranking = this.trainer.getModelRanking();
-        const container = document.getElementById('model-ranking');
+    updateLeaderboard(top10) {
+        const container = document.getElementById('leaderboard-body');
         container.innerHTML = '';
-        ranking.forEach((item, idx) => {
+        top10.forEach((item, idx) => {
             const div = document.createElement('div');
-            div.className = 'rank-item';
+            div.className = 'leaderboard-row';
+            if (this.trainer.watchedAiIdx === item.idx) div.classList.add('selected');
             div.innerHTML = `
                 <span class="rank">${idx + 1}</span>
                 <span class="name">${item.name}</span>
-                <span class="score">${item.score}</span>
+                <span class="winrate">${(item.winRate * 100).toFixed(1)}%</span>
+                <span class="games">${item.totalGames}</span>
             `;
+            div.addEventListener('click', () => {
+                const select = document.getElementById('watch-ai');
+                select.value = item.idx;
+                this.trainer.setWatchedAi(item.idx);
+                document.getElementById('watch-status').textContent = `观看: ${item.name}`;
+                this.updateLeaderboard(top10);
+                this.log(`已选择观看 AI: ${item.name}`, 'info');
+            });
             container.appendChild(div);
         });
+    }
+
+    // ===== 图表：200 AI胜率分布 =====
+    drawChart() {
+        const ctx = this.chartCtx;
+        const W = this.chartCanvas.width;
+        const H = this.chartCanvas.height;
+        ctx.clearRect(0, 0, W, H);
+
+        const history = this.trainer.winRateHistory;
+        if (history.length === 0) {
+            ctx.fillStyle = '#666';
+            ctx.font = '14px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('暂无数据 - 开始进化后显示200 AI胜率分布', W / 2, H / 2);
+            return;
+        }
+
+        const pad = 50;
+        const w = W - pad * 2;
+        const h = H - pad * 2;
+        const stepX = history.length > 1 ? w / (history.length - 1) : 0;
+
+        // 网格
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 5; i++) {
+            const y = pad + (h / 5) * i;
+            ctx.beginPath();
+            ctx.moveTo(pad, y);
+            ctx.lineTo(W - pad, y);
+            ctx.stroke();
+        }
+
+        // Y轴标签
+        ctx.fillStyle = '#888';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'right';
+        for (let i = 0; i <= 5; i++) {
+            const y = pad + (h / 5) * i;
+            ctx.fillText(`${100 - i * 20}%`, pad - 6, y + 3);
+        }
+
+        // 1. 画所有200个AI的胜率（半透明细线）
+        ctx.globalAlpha = 0.08;
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 0.5;
+        for (let ai = 0; ai < this.trainer.populationSize; ai++) {
+            ctx.beginPath();
+            for (let g = 0; g < history.length; g++) {
+                const x = pad + g * stepX;
+                const y = pad + h * (1 - history[g].all[ai]);
+                if (g === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+
+        // 2. 画Top 10的胜率（亮色线）
+        const colors = ['#00d2ff', '#00ff88', '#ff6b6b', '#ffd93d', '#a855f7',
+                        '#f472b6', '#38bdf8', '#fb923c', '#a3e635', '#22d3ee'];
+        for (let rank = 0; rank < 10; rank++) {
+            ctx.strokeStyle = colors[rank] || '#fff';
+            ctx.lineWidth = rank < 3 ? 2 : 1.2;
+            ctx.beginPath();
+            for (let g = 0; g < history.length; g++) {
+                const x = pad + g * stepX;
+                const y = pad + h * (1 - history[g].top10[rank]);
+                if (g === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }
+
+        // 3. 画平均胜率（橙色粗线）
+        ctx.strokeStyle = '#ffaa00';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        for (let g = 0; g < history.length; g++) {
+            const x = pad + g * stepX;
+            const y = pad + h * (1 - history[g].avg);
+            if (g === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // 4. 画中位数（虚线）
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        for (let g = 0; g < history.length; g++) {
+            const x = pad + g * stepX;
+            const y = pad + h * (1 - history[g].median);
+            if (g === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // X轴标签
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#888';
+        const labelStep = Math.max(1, Math.floor(history.length / 8));
+        for (let g = 0; g < history.length; g += labelStep) {
+            const x = pad + g * stepX;
+            ctx.fillText(`G${history[g].generation}`, x, H - 15);
+        }
+
+        // 标题
+        ctx.fillStyle = '#00d2ff';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('Top 10 + 全部平均 + 中位数', pad, 22);
     }
 
     // ===== 人机对战 =====
@@ -313,7 +438,6 @@ class GoUI {
         if (row >= 0 && row < this.boardSize && col >= 0 && col < this.boardSize) {
             if (this.gameBoard.makeMove(row, col)) {
                 this.drawBoard(this.ctxA, this.gameBoard, [row, col]);
-                this.updateGameInfo();
                 if (!this.gameBoard.isGameOver()) {
                     setTimeout(() => this.aiMove(), 300);
                 } else {
@@ -327,7 +451,6 @@ class GoUI {
         this.gameBoard.initBoard();
         this.playerColor = 1;
         this.drawBoard(this.ctxA, this.gameBoard);
-        this.updateGameInfo();
         this.log('新对局开始 - 你执黑', 'info');
     }
 
@@ -335,7 +458,6 @@ class GoUI {
         if (this.mode !== 'play') return;
         this.gameBoard.pass();
         this.drawBoard(this.ctxA, this.gameBoard);
-        this.updateGameInfo();
         if (!this.gameBoard.isGameOver()) {
             setTimeout(() => this.aiMove(), 300);
         } else {
@@ -345,134 +467,30 @@ class GoUI {
 
     aiMove() {
         if (this.mode !== 'play' || this.gameBoard.isGameOver()) return;
-        this.log('AI思考中...', 'info');
         const difficulty = document.getElementById('difficulty-select').value;
         setTimeout(() => {
             const move = this.trainer.getAIResponse(this.gameBoard, difficulty);
             if (move) {
                 this.gameBoard.makeMove(move[0], move[1]);
                 this.drawBoard(this.ctxA, this.gameBoard, move);
-                this.updateGameInfo();
-                this.log(`AI落子: (${move[0]}, ${move[1]})`, 'info');
             } else {
                 this.gameBoard.pass();
                 this.drawBoard(this.ctxA, this.gameBoard);
-                this.updateGameInfo();
-                this.log('AI选择跳过', 'info');
             }
-            if (this.gameBoard.isGameOver()) {
-                this.showGameResult();
-            }
+            if (this.gameBoard.isGameOver()) this.showGameResult();
         }, 100);
-    }
-
-    updateGameInfo() {
-        const player = this.gameBoard.currentPlayer === 1 ? '黑方' : '白方';
-        document.getElementById('current-player').textContent = player;
-        const score = this.gameBoard.calculateScore();
-        document.getElementById('black-score').textContent = score.black.toFixed(1);
-        document.getElementById('white-score').textContent = score.white.toFixed(1);
     }
 
     showGameResult() {
         const winner = this.gameBoard.getWinner();
         const score = this.gameBoard.calculateScore();
-        let message = '';
-        if (winner === 0) message = '平局！';
-        else message = winner === 1
+        let msg = '';
+        if (winner === 0) msg = '平局！';
+        else msg = winner === 1
             ? `黑方获胜！(${score.black.toFixed(1)} vs ${score.white.toFixed(1)})`
             : `白方获胜！(${score.white.toFixed(1)} vs ${score.black.toFixed(1)})`;
-        this.log(message, 'success');
-        setTimeout(() => alert(message), 200);
-    }
-
-    // ===== 图表 =====
-    drawChart() {
-        const ctx = this.chartCtx;
-        const W = this.chartCanvas.width;
-        const H = this.chartCanvas.height;
-        ctx.clearRect(0, 0, W, H);
-
-        const history = this.trainer.getTrainingStats().winHistory;
-        if (history.length === 0) {
-            ctx.fillStyle = '#666';
-            ctx.font = '16px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('暂无进化数据 - 点击"开始进化"开始训练', W / 2, H / 2);
-            return;
-        }
-
-        const padding = 50;
-        const width = W - padding * 2;
-        const height = H - padding * 2;
-
-        // 网格
-        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-        ctx.lineWidth = 1;
-        for (let i = 0; i <= 4; i++) {
-            const y = padding + (height / 4) * i;
-            ctx.beginPath();
-            ctx.moveTo(padding, y);
-            ctx.lineTo(W - padding, y);
-            ctx.stroke();
-        }
-
-        // 坐标轴标签
-        ctx.fillStyle = '#aaa';
-        ctx.font = '11px sans-serif';
-        ctx.textAlign = 'right';
-        ctx.fillText('100%', padding - 5, padding + 4);
-        ctx.fillText('50%', padding - 5, padding + height / 2 + 4);
-        ctx.fillText('0%', padding - 5, padding + height + 4);
-
-        // G3胜率曲线
-        ctx.strokeStyle = '#00d2ff';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        const stepX = history.length > 1 ? width / (history.length - 1) : 0;
-        for (let i = 0; i < history.length; i++) {
-            const x = padding + i * stepX;
-            const y = padding + height * (1 - history[i].g3WinRate);
-            if (i === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
-        }
-        ctx.stroke();
-
-        // 数据点
-        ctx.fillStyle = '#00d2ff';
-        for (let i = 0; i < history.length; i++) {
-            const x = padding + i * stepX;
-            const y = padding + height * (1 - history[i].g3WinRate);
-            ctx.beginPath();
-            ctx.arc(x, y, 3, 0, Math.PI * 2);
-            ctx.fill();
-        }
-
-        // 50%参考线
-        ctx.strokeStyle = 'rgba(255, 170, 0, 0.5)';
-        ctx.setLineDash([5, 5]);
-        ctx.beginPath();
-        ctx.moveTo(padding, padding + height / 2);
-        ctx.lineTo(W - padding, padding + height / 2);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        // X轴标签
-        ctx.textAlign = 'center';
-        ctx.fillStyle = '#aaa';
-        const labelStep = Math.max(1, Math.floor(history.length / 10));
-        for (let i = 0; i < history.length; i += labelStep) {
-            const x = padding + i * stepX;
-            ctx.fillText(`G${history[i].generation}`, x, H - 15);
-        }
-
-        // 图例
-        ctx.fillStyle = '#00d2ff';
-        ctx.font = 'bold 12px sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText('● G3新生代胜率', padding, 25);
-        ctx.fillStyle = '#ffaa00';
-        ctx.fillText('--- 50%基准线 (G3≥50%则进化成功)', padding + 150, 25);
+        this.log(msg, 'success');
+        setTimeout(() => alert(msg), 200);
     }
 
     // ===== 日志 =====
@@ -493,14 +511,13 @@ class GoUI {
     async loadLatestModel() {
         const loaded = await this.trainer.loadLatestModel();
         if (loaded) {
-            const stats = this.trainer.getTrainingStats();
+            const stats = this.trainer.getStats();
             document.getElementById('generation').textContent = stats.generation;
-            document.getElementById('evo-generation').textContent = `${stats.evoCycle} / 10`;
-            document.getElementById('games-played').textContent = stats.totalGames;
-            document.getElementById('g3-win-rate').textContent = `${Math.round(stats.avgG3WinRate * 100)}%`;
+            document.getElementById('total-games').textContent = stats.totalGames;
+            this.updateLeaderboard(stats.top10);
             this.drawChart();
-            this.updateModelRanking();
-            this.log(`已加载最新模型 (第${stats.generation}代)`, 'success');
+            this.populateAiSelect();
+            this.log(`已加载模型 (第${stats.generation}代, ${stats.totalGames}局)`, 'success');
         }
     }
 
@@ -516,12 +533,12 @@ class GoUI {
                     try {
                         const data = JSON.parse(event.target.result);
                         this.trainer.loadTrainingData(data);
-                        const stats = this.trainer.getTrainingStats();
+                        const stats = this.trainer.getStats();
                         document.getElementById('generation').textContent = stats.generation;
-                        document.getElementById('evo-generation').textContent = `${stats.evoCycle} / 10`;
-                        document.getElementById('games-played').textContent = stats.totalGames;
+                        document.getElementById('total-games').textContent = stats.totalGames;
+                        this.updateLeaderboard(stats.top10);
                         this.drawChart();
-                        this.updateModelRanking();
+                        this.populateAiSelect();
                         this.log('模型加载成功', 'success');
                     } catch (err) {
                         this.log('模型加载失败: ' + err.message, 'error');
@@ -540,7 +557,7 @@ class GoUI {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `eve-go-19-gen-${this.trainer.generation}.json`;
+        a.download = `eve-go-200-gen-${this.trainer.generation}.json`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -562,17 +579,17 @@ class GoUI {
             try {
                 const data = JSON.parse(event.target.result);
                 this.trainer.loadTrainingData(data);
-                const stats = this.trainer.getTrainingStats();
+                const stats = this.trainer.getStats();
                 document.getElementById('generation').textContent = stats.generation;
-                document.getElementById('evo-generation').textContent = `${stats.evoCycle} / 10`;
-                document.getElementById('games-played').textContent = stats.totalGames;
+                document.getElementById('total-games').textContent = stats.totalGames;
+                this.updateLeaderboard(stats.top10);
                 this.drawChart();
-                this.updateModelRanking();
-                document.getElementById('upload-status').textContent = '模型上传成功！';
+                this.populateAiSelect();
+                document.getElementById('upload-status').textContent = '上传成功！';
                 this.log('模型上传成功', 'success');
             } catch (err) {
-                document.getElementById('upload-status').textContent = '模型上传失败';
-                this.log('模型上传失败: ' + err.message, 'error');
+                document.getElementById('upload-status').textContent = '上传失败';
+                this.log('上传失败: ' + err.message, 'error');
             }
         };
         reader.readAsText(this.uploadFile);
