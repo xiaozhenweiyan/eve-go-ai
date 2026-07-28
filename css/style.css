@@ -135,6 +135,11 @@ header h1 {
 }
 .control-panel button:hover { background: rgba(255, 255, 255, 0.2); }
 .control-panel button:disabled { opacity: 0.4; cursor: not-allowed; }
+.control-panel button.danger-btn {
+    background: rgba(255, 68, 68, 0.15); color: #ff6666;
+    border: 1px solid rgba(255, 68, 68, 0.3);
+}
+.control-panel button.danger-btn:hover { background: rgba(255, 68, 68, 0.3); }
 
 .control-info { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); }
 .control-info p { margin: 6px 0; font-size: 0.85em; color: #ccc; }

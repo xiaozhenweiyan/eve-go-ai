@@ -1,11 +1,11 @@
-// Eve 种群进化训练器 - 200个AI / 20种族 互相随机对战
+// Eve 种群进化训练器 - 400个AI / 20种族 互相随机对战
 class EveTrainer {
-    constructor(boardSize = 19, populationSize = 200) {
+    constructor(boardSize = 19, populationSize = 400) {
         this.boardSize = boardSize;
         this.populationSize = populationSize;
         this.ga = new GeneticAlgorithm(boardSize, 0.12);
 
-        // 200个AI种群
+        // 400个AI种群
         this.population = [];
         this.speciesCount = 20;
         this.maxSpecies = 30;
@@ -53,18 +53,16 @@ class EveTrainer {
         // 创建20个种族的基础参数模板
         for (let s = 0; s < this.speciesCount; s++) {
             const baseNet = new PolicyNetwork(this.boardSize);
-            // 给每个种族不同的初始参数
             this.ga.mutate(baseNet, 0.4);
             this.speciesBaseWeights.push({ ...baseNet.weights });
         }
 
-        // 每个种族10个AI
-        const perSpecies = Math.floor(this.populationSize / this.speciesCount);
+        // 每个种族20个AI
+        const perSpecies = this.populationSize / this.speciesCount; // 400/20=20
         for (let i = 0; i < this.populationSize; i++) {
-            const species = i % this.speciesCount;
+            const species = Math.floor(i / perSpecies);
             const network = new PolicyNetwork(this.boardSize);
             network.weights = { ...this.speciesBaseWeights[species] };
-            // 种族内小变异
             this.ga.mutate(network, 0.05);
 
             this.population.push({
@@ -90,11 +88,26 @@ class EveTrainer {
                 losingStreak: 0
             });
         }
-        // 修正最后一个种族的数量
-        const remainder = this.populationSize - perSpecies * this.speciesCount;
-        for (let i = 0; i < remainder; i++) {
-            this.speciesStats[i].population++;
-        }
+    }
+
+    // 重置全部数据
+    resetAll() {
+        this.stopTraining();
+        this.generation = 0;
+        this.totalGames = 0;
+        this.isTraining = false;
+        this.isPaused = false;
+        this.watchedAiIdx = -1;
+        this.backgroundCount = 0;
+        this.showcaseMatchA = null;
+        this.showcaseMatchB = null;
+        this.winRateHistory = [];
+        this.speciesHistory = [];
+        this.initPopulation();
+        this.bestIdx = 0;
+        this.mcts.setPolicyNetwork(this.population[0].network);
+        // 清除本地存储
+        localStorage.removeItem('eve-go-400-model');
     }
 
     setSpeed(speed) { this.trainingSpeed = speed; }
@@ -783,14 +796,14 @@ class EveTrainer {
                 _compact: true,
                 _keptIndices: Array.from(keepIndices)
             };
-            localStorage.setItem('eve-go-200-model', JSON.stringify(compactData));
+            localStorage.setItem('eve-go-400-model', JSON.stringify(compactData));
         } catch (e) {
             console.error('保存失败:', e);
         }
     }
 
     async loadLatestModel() {
-        const saved = localStorage.getItem('eve-go-200-model');
+        const saved = localStorage.getItem('eve-go-400-model');
         if (!saved) return false;
         try {
             const data = JSON.parse(saved);

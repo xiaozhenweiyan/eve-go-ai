@@ -10,7 +10,7 @@ class GoUI {
         this.speciesChartCanvas = document.getElementById('species-chart-canvas');
         this.speciesChartCtx = this.speciesChartCanvas.getContext('2d');
 
-        this.trainer = new EveTrainer(this.boardSize, 200);
+        this.trainer = new EveTrainer(this.boardSize, 400);
         this.mode = 'training';
         this.playerColor = 1;
         this.gameBoard = new GoBoard(this.boardSize);
@@ -49,7 +49,7 @@ class GoUI {
         this.loadLatestModel();
         this.drawChart();
         this.drawSpeciesChart();
-        this.log('Eve 200 AI 进化系统已就绪 (20种族)', 'info');
+        this.log('Eve 400 AI 进化系统已就绪 (20种族×20)', 'info');
     }
 
     setupEventListeners() {
@@ -62,6 +62,7 @@ class GoUI {
         document.getElementById('btn-stop-training').addEventListener('click', () => this.stopTraining());
         document.getElementById('btn-pause-training').addEventListener('click', () => this.pauseTraining());
         document.getElementById('btn-save-model').addEventListener('click', () => this.saveModel());
+        document.getElementById('btn-reset-all').addEventListener('click', () => this.resetAllData());
 
         document.getElementById('btn-reset-game').addEventListener('click', () => this.resetGame());
         document.getElementById('btn-pass').addEventListener('click', () => this.pass());
@@ -256,7 +257,7 @@ class GoUI {
         document.getElementById('btn-stop-training').disabled = false;
         document.getElementById('btn-pause-training').disabled = false;
         document.getElementById('training-status').textContent = '进化中';
-        this.log('200 AI 进化训练开始！ (20种族)', 'info');
+        this.log('400 AI 进化训练开始！ (20种族×20)', 'info');
 
         this.trainer.onBoardUpdate = (data) => this.handleBoardUpdate(data);
         this.trainer.onMatchEnd = (data) => this.handleMatchEnd(data);
@@ -284,6 +285,56 @@ class GoUI {
         if (paused) {
             this.log('训练已暂停，可以选定AI观看', 'info');
         }
+    }
+
+    resetAllData() {
+        if (this.trainer.isTraining) {
+            this.log('请先停止训练再重置', 'warning');
+            return;
+        }
+        if (!confirm('确定要重置全部数据吗？\n所有胜率、种族、图表、代数将清零，且无法恢复。')) return;
+
+        this.trainer.resetAll();
+
+        // 重置UI显示
+        document.getElementById('generation').textContent = '0';
+        document.getElementById('total-games').textContent = '0';
+        document.getElementById('active-species').textContent = '20';
+        document.getElementById('training-status').textContent = '空闲';
+        document.getElementById('btn-start-training').disabled = false;
+        document.getElementById('btn-stop-training').disabled = true;
+        document.getElementById('btn-pause-training').disabled = true;
+        document.getElementById('btn-pause-training').textContent = '暂停';
+        document.getElementById('watch-status').textContent = '自动模式 (Top胜率)';
+
+        // 清空棋盘
+        this.drawEmptyBoard(this.ctxA);
+        this.drawEmptyBoard(this.ctxB);
+        document.getElementById('black-name-a').textContent = '--';
+        document.getElementById('white-name-a').textContent = '--';
+        document.getElementById('black-score-a').textContent = '0';
+        document.getElementById('white-score-a').textContent = '0';
+        document.getElementById('match-info-a').textContent = '已重置';
+        document.getElementById('black-name-b').textContent = '--';
+        document.getElementById('white-name-b').textContent = '--';
+        document.getElementById('black-score-b').textContent = '0';
+        document.getElementById('white-score-b').textContent = '0';
+        document.getElementById('match-info-b').textContent = '已重置';
+
+        // 清空排行榜
+        document.getElementById('leaderboard-body').innerHTML = '';
+
+        // 重置图表
+        this.drawChart();
+        this.drawSpeciesChart();
+
+        // 重置AI选择下拉框
+        this.populateAiSelect();
+
+        // 清空日志（保留重置消息）
+        document.getElementById('log-content').innerHTML = '';
+
+        this.log('全部数据已重置！400 AI / 20种族（每族20个）已重新初始化', 'success');
     }
 
     handleBoardUpdate(data) {
@@ -371,7 +422,7 @@ class GoUI {
             ctx.fillStyle = '#666';
             ctx.font = '14px sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText('暂无数据 - 开始进化后显示200 AI胜率分布', W / 2, H / 2);
+            ctx.fillText('暂无数据 - 开始进化后显示400 AI胜率分布', W / 2, H / 2);
             return;
         }
 

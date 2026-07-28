@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Eve - 200 AI 进化围棋</title>
+    <title>Eve - 400 AI 进化围棋</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
     <div id="app">
         <header>
-            <h1>Eve - 200 AI 进化围棋系统</h1>
+            <h1>Eve - 400 AI 进化围棋系统</h1>
             <div id="mode-select">
                 <button id="btn-training" class="mode-btn active">进化训练</button>
                 <button id="btn-play" class="mode-btn">人机对战</button>
@@ -57,6 +57,7 @@
                     <button id="btn-stop-training" disabled>停止进化</button>
                     <button id="btn-pause-training" disabled>暂停</button>
                     <button id="btn-save-model">保存模型</button>
+                    <button id="btn-reset-all" class="danger-btn">重置全部数据</button>
                     <div class="control-info">
                         <p>状态: <span id="training-status">空闲</span></p>
                         <p>总对局: <span id="total-games">0</span></p>
@@ -69,7 +70,7 @@
                         <span id="speed-value">5</span>
                     </div>
                     <div class="genetic-settings">
-                        <label>种群: 200 (20种族)</label>
+                        <label>种群: 400 (20种族×20)</label>
                         <label>进化间隔: 每10局</label>
                     </div>
                 </div>
@@ -102,7 +103,7 @@
 
             <!-- 底部：可视化 + 日志 -->
             <div id="visualization">
-                <h3>200 AI 胜率分布</h3>
+                <h3>400 AI 胜率分布</h3>
                 <canvas id="chart-canvas" width="900" height="320"></canvas>
                 <div id="chart-legend">
                     <span class="legend-item"><span class="dot" style="background:#00d2ff"></span> Top 10</span>
