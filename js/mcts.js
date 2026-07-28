@@ -20,7 +20,7 @@ class MCTSNode {
 }
 
 class MCTS {
-    constructor(boardSize = 19, iterations = 100) {
+    constructor(boardSize = 19, iterations = 50) {
         this.boardSize = boardSize;
         this.iterations = iterations;
         this.root = null;
@@ -85,15 +85,22 @@ class MCTS {
         const board = new GoBoard(this.boardSize);
         board.setState(node.state);
         let moves = 0;
-        const maxMoves = this.boardSize * this.boardSize;
+        // 限制模拟步数，避免过长对局阻塞主线程
+        const maxMoves = Math.min(120, this.boardSize * this.boardSize);
         while (!board.isGameOver() && moves < maxMoves) {
             const validMoves = board.getValidMovesFast();
             if (validMoves.length === 0) { board.pass(); moves++; continue; }
-            const move = this.policyNetwork
-                ? this.policyNetwork.selectMove(board, validMoves, 0.3)
-                : validMoves[Math.floor(Math.random() * validMoves.length)];
+            // simulate 阶段用轻量级随机走子，避免策略网络评估阻塞UI
+            const move = validMoves[Math.floor(Math.random() * validMoves.length)];
             board.makeMove(move[0], move[1]);
             moves++;
+        }
+        // 如果未结束，快速判分
+        if (!board.isGameOver()) {
+            const score = board.calculateScore();
+            if (score.black > score.white) return 1;
+            if (score.white > score.black) return 2;
+            return 0;
         }
         return board.getWinner();
     }

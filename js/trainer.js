@@ -741,10 +741,10 @@ class EveTrainer {
     getAIResponse(board, difficulty = 'medium') {
         let iterations;
         switch (difficulty) {
-            case 'easy': iterations = 20; break;
-            case 'medium': iterations = 60; break;
-            case 'hard': iterations = 150; break;
-            default: iterations = 60;
+            case 'easy': iterations = 15; break;
+            case 'medium': iterations = 35; break;
+            case 'hard': iterations = 80; break;
+            default: iterations = 35;
         }
         return this.mcts.getBestMove(board, iterations);
     }
