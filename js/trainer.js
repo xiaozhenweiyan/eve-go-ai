@@ -176,6 +176,18 @@ class EveTrainer {
         return diff > 35;
     }
 
+    // 收官判断：局势已定时主动停手
+    isEndgameSettled(board) {
+        // 150步以后才考虑收官
+        if (board.moveCount < 150) return false;
+        const validMoves = board.getValidMovesFast();
+        // 有效落子点极少 = 大局已定
+        if (validMoves.length < 5) return true;
+        // 如果只剩不到10个落子点且都在某一方领地内
+        if (validMoves.length < 10 && board.moveCount > 200) return true;
+        return false;
+    }
+
     // 主训练循环
     async startTraining() {
         this.isTraining = true;
@@ -266,8 +278,15 @@ class EveTrainer {
                 continue;
             }
 
+            // 收官阶段局势已定则停手
+            if (this.isEndgameSettled(board)) {
+                board.pass();
+                board.pass();
+                break;
+            }
+
             // 没有有价值的棋可下时主动pass
-            if (step > 100 && validMoves.length < 3) {
+            if (step > 120 && validMoves.length < 4) {
                 board.pass();
                 passes++;
                 if (passes >= 2) break;
@@ -299,10 +318,11 @@ class EveTrainer {
         }
 
         const score = board.calculateScore();
+        const points = board.calculatePoints();
         blackNet.learnFromResult(winner === 1);
         whiteNet.learnFromResult(winner === 2);
 
-        return { winner, score, moves: board.moveCount, resigned: resigned > 0 };
+        return { winner, score, points, moves: board.moveCount, resigned: resigned > 0 };
     }
 
     // 展示对局：正常速度，更新两个棋盘
@@ -342,14 +362,19 @@ class EveTrainer {
                 boardA.pass();
                 passesA++;
                 if (passesA >= 2) break;
-            } else if (step > 100 && validMovesA.length < 3) {
+            } else if (this.isEndgameSettled(boardA)) {
+                boardA.pass();
+                boardA.pass();
+                break;
+            } else if (step > 120 && validMovesA.length < 4) {
                 boardA.pass();
                 passesA++;
                 if (passesA >= 2) break;
             } else {
                 passesA = 0;
                 const currentNetA = boardA.currentPlayer === 1 ? black.network : white.network;
-                const temperature = Math.max(0.05, 0.5 - step / 400);
+                // 收官阶段降低temperature，避免无意义探索
+                const temperature = boardA.moveCount > 150 ? 0.05 : Math.max(0.05, 0.5 - step / 400);
                 const moveA = currentNetA.selectMove(boardA, validMovesA, temperature);
                 if (moveA) {
                     boardA.makeMove(moveA[0], moveA[1]);
@@ -389,6 +414,7 @@ class EveTrainer {
         }
 
         const score = boardA.calculateScore();
+        const points = boardA.calculatePoints();
         black.network.learnFromResult(winner === 1);
         white.network.learnFromResult(winner === 2);
 
@@ -398,6 +424,7 @@ class EveTrainer {
                 white: white.name,
                 winner: winner,
                 score: score,
+                points: points,
                 moves: moveCount,
                 totalGames: this.totalGames,
                 isShowcase: true,
@@ -407,7 +434,7 @@ class EveTrainer {
         }
 
         this.showcaseMatchB = null;
-        return { winner, score, moves: moveCount, resigned: resigned > 0 };
+        return { winner, score, points, moves: moveCount, resigned: resigned > 0 };
     }
 
     simulateShowcaseBStep() {
@@ -444,12 +471,15 @@ class EveTrainer {
         if (!this.showcaseMatchA) return null;
         const tm = this.showcaseMatchA;
         const board = tm.board;
+        const points = board.calculatePoints();
         return {
             board: board.getState(),
             blackName: this.population[tm.blackIdx].name,
             whiteName: this.population[tm.whiteIdx].name,
-            blackScore: board.calculateScore().black,
-            whiteScore: board.calculateScore().white,
+            blackPoints: points.black,
+            whitePoints: points.white,
+            pointDiff: points.diff,
+            pointLead: points.leading,
             moveCount: board.moveCount,
             blackSpecies: this.population[tm.blackIdx].species,
             whiteSpecies: this.population[tm.whiteIdx].species
@@ -460,12 +490,15 @@ class EveTrainer {
         if (!this.showcaseMatchB) return null;
         const tm = this.showcaseMatchB;
         const board = tm.board;
+        const points = board.calculatePoints();
         return {
             board: board.getState(),
             blackName: this.population[tm.blackIdx].name,
             whiteName: this.population[tm.whiteIdx].name,
-            blackScore: board.calculateScore().black,
-            whiteScore: board.calculateScore().white,
+            blackPoints: points.black,
+            whitePoints: points.white,
+            pointDiff: points.diff,
+            pointLead: points.leading,
             moveCount: board.moveCount,
             blackSpecies: this.population[tm.blackIdx].species,
             whiteSpecies: this.population[tm.whiteIdx].species

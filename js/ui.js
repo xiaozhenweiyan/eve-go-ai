@@ -344,10 +344,14 @@ class GoUI {
             this.drawBoard(this.ctxA, board);
             document.getElementById('black-name-a').textContent = data.showcaseA.blackName;
             document.getElementById('white-name-a').textContent = data.showcaseA.whiteName;
-            document.getElementById('black-score-a').textContent = data.showcaseA.blackScore.toFixed(1);
-            document.getElementById('white-score-a').textContent = data.showcaseA.whiteScore.toFixed(1);
+            const leadA = data.showcaseA.pointLead;
+            const diffA = data.showcaseA.pointDiff.toFixed(1);
+            document.getElementById('black-score-a').textContent =
+                `${data.showcaseA.blackPoints.toFixed(1)}目`;
+            document.getElementById('white-score-a').textContent =
+                `${data.showcaseA.whitePoints.toFixed(1)}目`;
             document.getElementById('match-info-a').textContent =
-                `${data.showcaseA.blackName}(S${data.showcaseA.blackSpecies}) vs ${data.showcaseA.whiteName}(S${data.showcaseA.whiteSpecies}) 第${data.showcaseA.moveCount}手`;
+                `${data.showcaseA.blackName}(S${data.showcaseA.blackSpecies}) vs ${data.showcaseA.whiteName}(S${data.showcaseA.whiteSpecies}) 第${data.showcaseA.moveCount}手 | ${leadA}领先${diffA}目`;
         }
 
         if (data.showcaseB && data.showcaseB.board) {
@@ -356,10 +360,14 @@ class GoUI {
             this.drawBoard(this.ctxB, board);
             document.getElementById('black-name-b').textContent = data.showcaseB.blackName;
             document.getElementById('white-name-b').textContent = data.showcaseB.whiteName;
-            document.getElementById('black-score-b').textContent = data.showcaseB.blackScore.toFixed(1);
-            document.getElementById('white-score-b').textContent = data.showcaseB.whiteScore.toFixed(1);
+            const leadB = data.showcaseB.pointLead;
+            const diffB = data.showcaseB.pointDiff.toFixed(1);
+            document.getElementById('black-score-b').textContent =
+                `${data.showcaseB.blackPoints.toFixed(1)}目`;
+            document.getElementById('white-score-b').textContent =
+                `${data.showcaseB.whitePoints.toFixed(1)}目`;
             document.getElementById('match-info-b').textContent =
-                `${data.showcaseB.blackName}(S${data.showcaseB.blackSpecies}) vs ${data.showcaseB.whiteName}(S${data.showcaseB.whiteSpecies}) 第${data.showcaseB.moveCount}手`;
+                `${data.showcaseB.blackName}(S${data.showcaseB.blackSpecies}) vs ${data.showcaseB.whiteName}(S${data.showcaseB.whiteSpecies}) 第${data.showcaseB.moveCount}手 | ${leadB}领先${diffB}目`;
         }
 
         document.getElementById('total-games').textContent = data.totalGames;
@@ -369,7 +377,9 @@ class GoUI {
         const prefix = data.isShowcase ? '[展示]' : '[后台]';
         const suffix = data.resigned ? ' (投子认输)' : '';
         const w = data.winner === 1 ? data.black : data.winner === 2 ? data.white : '平局';
-        this.log(`${prefix} #${data.totalGames} ${data.black} vs ${data.white} -> ${w}${suffix}`, 'info');
+        const pt = data.points;
+        const scoreInfo = pt ? ` | 黑${pt.black.toFixed(1)}目 白${pt.white.toFixed(1)}目(${pt.leading}领先${pt.diff.toFixed(1)}目)` : '';
+        this.log(`${prefix} #${data.totalGames} ${data.black} vs ${data.white} -> ${w}${suffix}${scoreInfo}`, 'info');
     }
 
     handleStatsUpdate(stats) {
@@ -702,12 +712,12 @@ class GoUI {
 
     showGameResult() {
         const winner = this.gameBoard.getWinner();
-        const score = this.gameBoard.calculateScore();
+        const points = this.gameBoard.calculatePoints();
         let msg = '';
         if (winner === 0) msg = '平局！';
         else msg = winner === 1
-            ? `黑方获胜！(${score.black.toFixed(1)} vs ${score.white.toFixed(1)})`
-            : `白方获胜！(${score.white.toFixed(1)} vs ${score.black.toFixed(1)})`;
+            ? `黑方获胜！黑${points.black.toFixed(1)}目 vs 白${points.white.toFixed(1)}目 (${points.leading}领先${points.diff.toFixed(1)}目)`
+            : `白方获胜！白${points.white.toFixed(1)}目 vs 黑${points.black.toFixed(1)}目 (${points.leading}领先${points.diff.toFixed(1)}目)`;
         this.log(msg, 'success');
         setTimeout(() => alert(msg), 200);
     }

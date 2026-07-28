@@ -267,9 +267,20 @@ class GoBoard {
 
     calculateScore() {
         const territory = this.calculateTerritory();
-        const blackScore = territory.black + this.blackCaptures + 6.5; // 贴目6.5
-        const whiteScore = territory.white + this.whiteCaptures;
-        return { black: blackScore, white: whiteScore };
+        const komi = 6.5;
+        const blackScore = territory.black + this.blackCaptures;
+        const whiteScore = territory.white + this.whiteCaptures + komi;
+        return { black: blackScore, white: whiteScore, komi, blackTerritory: territory.black, whiteTerritory: territory.white };
+    }
+
+    // 返回目数信息（包含差值）用于UI显示
+    calculatePoints() {
+        const score = this.calculateScore();
+        const blackPoints = score.black;
+        const whitePoints = score.white;
+        const diff = Math.abs(blackPoints - whitePoints);
+        const leading = blackPoints > whitePoints ? '黑' : (whitePoints > blackPoints ? '白' : '均');
+        return { black: blackPoints, white: whitePoints, diff, leading, komi: score.komi };
     }
 
     calculateTerritory() {
