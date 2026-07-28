@@ -124,33 +124,35 @@ class PolicyNetwork {
             capture: 3.0,
             atari: 2.0,
             saveAtari: 2.5,
-            liberty: 0.3,               // 降低，不要只顾着长气
-            territory: 0.15,            // 再降低，不要只想围地
-            influence: 0.1,             // 再降低
-            connection: 0.02,           // 极低，避免占满自己的地
-            approach: 1.5,              // 提高，鼓励靠近对方
-            starPoint: 1.0,             // 占角优先
-            thirdLine: 1.0,             // 占边很重要
-            fourthLine: 0.8,            // 势力线
+            liberty: 0.3,
+            territory: 0.4,
+            influence: 0.2,
+            connection: 0.1,
+            approach: 1.2,
+            starPoint: 1.0,
+            thirdLine: 1.0,
+            fourthLine: 0.8,
             edge: -0.3,
             firstLine: -0.8,
             selfAtari: -3.0,
             eyeShape: 3.0,
-            eyeFill: -6.0,              // 更严厉
-            territoryFill: -8.0,        // 极严厉惩罚填自己地
-            eyeCreation: 0.8,           // 己方做眼奖励再降低
-            groupSafety: 0.8,           // 再降低，不要太保守
-            cuttingPoint: 2.5,          // 提高，切断对方很重要
-            expand: 0.05,               // 再降低，不要扩展自己势力
-            eyeSpaceProtect: 0.5,       // 降低
-            invasion: 6.0,              // 大幅提高：打入对方领地
-            liveInEnemyTerritory: 10.0, // 大幅提高：在对方领地内做出活形
-            borderFight: 5.0,           // 大幅提高：边界争夺
-            splitEnemy: 5.0,            // 大幅提高：分断对方棋群
-            deepInvasion: 4.0,          // 新增：深入对方腹地
-            enemyEyeDestroy: 3.0,       // 新增：破坏对方眼位
-            reduceEnemyTerritory: 2.0,  // 新增：减少对方领地
-            selfTerritoryAvoid: -3.0    // 新增：在己方腹地落子惩罚
+            eyeFill: 0,                 // 填充眼奖励为0（不惩罚也不奖励）
+            territoryFill: -3.0,        // 填自己领地惩罚
+            eyeCreation: 1.2,
+            groupSafety: 1.0,
+            cuttingPoint: 2.0,
+            expand: 0.2,
+            eyeSpaceProtect: 0.8,
+            invasion: 2.5,              // 降低入侵奖励
+            liveInEnemyTerritory: 4.0,  // 降低在对方领地做眼奖励
+            borderFight: 2.0,           // 降低边界争夺奖励
+            splitEnemy: 2.5,            // 降低分断对方奖励
+            deepInvasion: 1.5,          // 降低深入对方腹地奖励
+            enemyEyeDestroy: 2.0,
+            reduceEnemyTerritory: 1.5,
+            selfTerritoryAvoid: -1.5,   // 降低己方腹地惩罚
+            koThreat: 1.5,              // 新增：制造劫材威胁
+            koDefense: 2.0              // 新增：劫争防守价值
         };
     }
 
@@ -549,7 +551,7 @@ class PolicyNetwork {
 
         // === 核心惩罚：填自己的眼 - O(1) ===
         if (this.fillsOwnEye(boardArr, i, player)) {
-            return this.weights.eyeFill;
+            return this.weights.eyeFill;  // 填眼奖励为0，不惩罚也不奖励
         }
 
         // 模拟落子
@@ -642,7 +644,42 @@ class PolicyNetwork {
         // 19. 影响力评估 - O(25)
         score += this.evaluateInfluenceFast(testBoard, i, player);
 
+        // 20. 劫争评估 - 如果当前有劫争，评估制造劫材或应对劫争的价值
+        score += this.evaluateKo(board, row, col, player);
+
         return score;
+    }
+
+    // 评估劫争相关价值
+    evaluateKo(board, row, col, color) {
+        let koScore = 0;
+
+        // 如果当前有劫争
+        if (board.hasKoThreat && board.hasKoThreat()) {
+            const koPoint = board.getKoPoint();
+
+            // 如果是制造劫材的落子（能在别处造成威胁）
+            // 检查这个落子是否能影响劫争结果
+            if (board.koPlayer === color) {
+                // 当前玩家受限，需要找劫材
+                // 如果这个落子能提子或有其他威胁价值，增加劫材价值
+                const neighbors = this.getNeighborIndices(board.idx(row, col));
+                for (const n of neighbors) {
+                    if (board.board[n] === 3 - color) {
+                        const { liberties } = board.findGroupAndLiberties(board.board, n);
+                        if (liberties <= 2) {
+                            koScore += this.weights.koThreat;
+                            break;
+                        }
+                    }
+                }
+            } else {
+                // 对方受限，这个落子可能是应对劫争
+                koScore += this.weights.koDefense * 0.5;
+            }
+        }
+
+        return koScore;
     }
 
     evaluatePositionalValue(row, col) {
@@ -693,12 +730,13 @@ class PolicyNetwork {
         const nonEyeFillMoves = [];
         const nonEyeFillScores = [];
         for (let i = 0; i < validMoves.length; i++) {
-            const isEyeFill = scores[i] <= this.weights.eyeFill;
+            const move = validMoves[i];
+            const mi = board.idx(move[0], move[1]);
+            // 明确检查是否填眼
+            const isEyeFill = this.fillsOwnEye(boardArr, mi, board.currentPlayer);
             // 中盘阶段（30-120手），额外过滤掉完全在己方腹地且无战略价值的落子
             let isBadFill = false;
             if (!isEyeFill && board.moveCount > 30 && board.moveCount < 120 && territoryMap) {
-                const move = validMoves[i];
-                const mi = board.idx(move[0], move[1]);
                 // 如果落在己方领地，且总分低于一个阈值（说明没有入侵/分断等价值）
                 if (territoryMap[mi] === board.currentPlayer && scores[i] < -2.0) {
                     isBadFill = true;
@@ -746,37 +784,33 @@ class PolicyNetwork {
         const lr = this.learningRate;
         const w = this.weights;
         if (isWin) {
+            // 赢棋：稍微强化当前策略
+            w.capture += lr * 0.01;
+            w.atari += lr * 0.01;
+            w.invasion += lr * 0.015;
+            w.liveInEnemyTerritory += lr * 0.02;
+            w.borderFight += lr * 0.015;
+            w.splitEnemy += lr * 0.015;
+            w.deepInvasion += lr * 0.01;
+            w.enemyEyeDestroy += lr * 0.01;
+            w.koThreat += lr * 0.01;
+            w.koDefense += lr * 0.01;
+            // eyeFill 保持为0，不调整
+        } else {
+            // 输棋：增强进攻性，提高做眼和防守
             w.eyeShape += lr * 0.02;
-            w.eyeCreation += lr * 0.01;
-            w.eyeFill -= lr * 0.015;
-            w.territoryFill -= lr * 0.02;
-            w.groupSafety += lr * 0.01;
-            w.expand -= lr * 0.01;
-            w.invasion += lr * 0.03;
-            w.liveInEnemyTerritory += lr * 0.03;
+            w.eyeCreation += lr * 0.015;
+            w.groupSafety += lr * 0.015;
+            w.saveAtari += lr * 0.02;
+            w.invasion += lr * 0.02;
+            w.liveInEnemyTerritory += lr * 0.025;
             w.borderFight += lr * 0.02;
             w.splitEnemy += lr * 0.02;
-            w.deepInvasion += lr * 0.02;
-            w.enemyEyeDestroy += lr * 0.02;
-            w.reduceEnemyTerritory += lr * 0.01;
-            w.selfTerritoryAvoid -= lr * 0.02;
-            w.connection -= lr * 0.01;
-        } else {
-            w.eyeShape += lr * 0.03;
-            w.eyeCreation += lr * 0.02;
-            w.eyeFill -= lr * 0.025;
-            w.territoryFill -= lr * 0.03;
-            w.groupSafety += lr * 0.02;
-            w.expand -= lr * 0.015;
-            w.invasion += lr * 0.04;
-            w.liveInEnemyTerritory += lr * 0.04;
-            w.borderFight += lr * 0.03;
-            w.splitEnemy += lr * 0.03;
-            w.deepInvasion += lr * 0.03;
-            w.enemyEyeDestroy += lr * 0.03;
-            w.reduceEnemyTerritory += lr * 0.02;
-            w.selfTerritoryAvoid -= lr * 0.03;
-            w.connection -= lr * 0.02;
+            w.koThreat += lr * 0.015;
+            w.koDefense += lr * 0.015;
+            w.territoryFill -= lr * 0.01;
+            w.selfTerritoryAvoid -= lr * 0.01;
+            // eyeFill 保持为0，不调整
         }
         const keys = Object.keys(w);
         for (const key of keys) w[key] = Math.max(-5, Math.min(5, this.weights[key]));

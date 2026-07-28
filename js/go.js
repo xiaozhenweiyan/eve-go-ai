@@ -16,6 +16,10 @@ class GoBoard {
         this.blackCaptures = 0;
         this.whiteCaptures = 0;
         this.moveCount = 0;
+        // 劫争状态
+        this.koPoint = null;           // 当前劫点（对方刚提1子，本方不能立即回提）
+        this.koPlayer = 0;              // 劫争限制方（谁不能立即回提）
+        this.lastCapturedPoint = null;  // 上一步被提的点（用于判断劫）
     }
 
     idx(row, col) {
@@ -29,7 +33,10 @@ class GoBoard {
             blackCaptures: this.blackCaptures,
             whiteCaptures: this.whiteCaptures,
             passCount: this.passCount,
-            moveCount: this.moveCount
+            moveCount: this.moveCount,
+            koPoint: this.koPoint,
+            koPlayer: this.koPlayer,
+            lastCapturedPoint: this.lastCapturedPoint
         };
     }
 
@@ -40,6 +47,9 @@ class GoBoard {
         this.whiteCaptures = state.whiteCaptures;
         this.passCount = state.passCount;
         this.moveCount = state.moveCount || 0;
+        this.koPoint = state.koPoint || null;
+        this.koPlayer = state.koPlayer || 0;
+        this.lastCapturedPoint = state.lastCapturedPoint || null;
         this.previousBoardHash = this.history.length > 0
             ? this.hashBoard(new Int8Array(this.history[this.history.length - 1].board))
             : null;
@@ -55,6 +65,9 @@ class GoBoard {
         clone.moveCount = this.moveCount;
         clone.previousBoardHash = this.previousBoardHash;
         clone.history = this.history.map(h => ({ ...h, board: Array.from(h.board) }));
+        clone.koPoint = this.koPoint;
+        clone.koPlayer = this.koPlayer;
+        clone.lastCapturedPoint = this.lastCapturedPoint;
         return clone;
     }
 
@@ -112,12 +125,18 @@ class GoBoard {
         const i = this.idx(row, col);
         if (this.board[i] !== 0) return false;
 
+        // 劫争规则：不能立即回提劫点
+        if (this.koPoint === i && this.koPlayer === this.currentPlayer) {
+            return false;
+        }
+
         const testBoard = new Int8Array(this.board);
         testBoard[i] = this.currentPlayer;
         const opponent = 3 - this.currentPlayer;
 
         // 只检查相邻的对方棋子组是否被提
         let captured = 0;
+        let capturedPoint = null;
         const neighbors = this.getNeighbors(i);
         const checked = new Set();
         for (const n of neighbors) {
@@ -126,7 +145,13 @@ class GoBoard {
                 group.forEach(g => checked.add(g));
                 if (liberties === 0) {
                     captured += group.length;
-                    for (const g of group) testBoard[g] = 0;
+                    for (const g of group) {
+                        testBoard[g] = 0;
+                    }
+                    // 记录被提的点
+                    if (group.length === 1) {
+                        capturedPoint = group[0];
+                    }
                 }
             }
         }
@@ -142,6 +167,23 @@ class GoBoard {
         }
 
         return true;
+    }
+
+    // 检查是否有劫争机会（制造劫材威胁）
+    hasKoThreat() {
+        return this.koPoint !== null;
+    }
+
+    // 获取劫点位置
+    getKoPoint() {
+        return this.koPoint;
+    }
+
+    // 清除劫争状态
+    clearKo() {
+        this.koPoint = null;
+        this.koPlayer = 0;
+        this.lastCapturedPoint = null;
     }
 
     getValidMoves() {
@@ -213,7 +255,10 @@ class GoBoard {
             blackCaptures: this.blackCaptures,
             whiteCaptures: this.whiteCaptures,
             passCount: this.passCount,
-            moveCount: this.moveCount
+            moveCount: this.moveCount,
+            koPoint: this.koPoint,
+            koPlayer: this.koPlayer,
+            lastCapturedPoint: this.lastCapturedPoint
         });
 
         const i = this.idx(row, col);
@@ -224,19 +269,43 @@ class GoBoard {
         const neighbors = this.getNeighbors(i);
         const checked = new Set();
         let totalCaptured = 0;
+        let capturedPoint = null;
+        let capturedByThisMove = [];
+
         for (const n of neighbors) {
             if (this.board[n] === opponent && !checked.has(n)) {
                 const { group, liberties } = this.findGroupAndLiberties(this.board, n);
                 group.forEach(g => checked.add(g));
                 if (liberties === 0) {
-                    for (const g of group) this.board[g] = 0;
+                    for (const g of group) {
+                        this.board[g] = 0;
+                        capturedByThisMove.push(g);
+                    }
                     totalCaptured += group.length;
+                    if (group.length === 1) {
+                        capturedPoint = group[0];
+                    }
                 }
             }
         }
 
         if (this.currentPlayer === 1) this.blackCaptures += totalCaptured;
         else this.whiteCaptures += totalCaptured;
+
+        // 设置劫争状态
+        // 如果恰好提1子，且落子点气数为1（会被对方立即回提），则形成劫争
+        const { liberties: myLiberties } = this.findGroupAndLiberties(this.board, i);
+        if (totalCaptured === 1 && capturedPoint !== null && myLiberties === 1) {
+            // 形成劫争：对方不能立即回提 capturedPoint（落子点i）
+            this.koPoint = capturedPoint;
+            this.koPlayer = opponent;
+            this.lastCapturedPoint = i;
+        } else {
+            // 非劫争情况，清除劫争状态
+            this.koPoint = null;
+            this.koPlayer = 0;
+            this.lastCapturedPoint = null;
+        }
 
         this.previousBoardHash = this.hashBoard(new Int8Array(this.history[this.history.length - 1].board));
         this.currentPlayer = opponent;
@@ -253,11 +322,18 @@ class GoBoard {
             blackCaptures: this.blackCaptures,
             whiteCaptures: this.whiteCaptures,
             passCount: this.passCount,
-            moveCount: this.moveCount
+            moveCount: this.moveCount,
+            koPoint: this.koPoint,
+            koPlayer: this.koPlayer,
+            lastCapturedPoint: this.lastCapturedPoint
         });
         this.currentPlayer = 3 - this.currentPlayer;
         this.passCount++;
         this.moveCount++;
+        // pass 后劫争状态清除
+        this.koPoint = null;
+        this.koPlayer = 0;
+        this.lastCapturedPoint = null;
         return true;
     }
 
