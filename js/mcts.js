@@ -124,25 +124,33 @@ class PolicyNetwork {
             capture: 3.0,
             atari: 2.0,
             saveAtari: 2.5,
-            liberty: 0.4,
-            territory: 1.0,
-            influence: 0.35,
-            connection: 0.3,
-            approach: 0.3,
-            starPoint: 0.8,
-            thirdLine: 0.7,
-            fourthLine: 0.5,
-            edge: -0.5,
-            firstLine: -1.0,
+            liberty: 0.3,               // 降低，不要只顾着长气
+            territory: 0.15,            // 再降低，不要只想围地
+            influence: 0.1,             // 再降低
+            connection: 0.02,           // 极低，避免占满自己的地
+            approach: 1.5,              // 提高，鼓励靠近对方
+            starPoint: 1.0,             // 占角优先
+            thirdLine: 1.0,             // 占边很重要
+            fourthLine: 0.8,            // 势力线
+            edge: -0.3,
+            firstLine: -0.8,
             selfAtari: -3.0,
-            eyeShape: 4.0,
-            eyeFill: -5.0,
-            territoryFill: -3.0,
-            eyeCreation: 3.5,
-            groupSafety: 2.0,
-            cuttingPoint: 0.7,
-            expand: 0.6,
-            eyeSpaceProtect: 2.5
+            eyeShape: 3.0,
+            eyeFill: -6.0,              // 更严厉
+            territoryFill: -8.0,        // 极严厉惩罚填自己地
+            eyeCreation: 0.8,           // 己方做眼奖励再降低
+            groupSafety: 0.8,           // 再降低，不要太保守
+            cuttingPoint: 2.5,          // 提高，切断对方很重要
+            expand: 0.05,               // 再降低，不要扩展自己势力
+            eyeSpaceProtect: 0.5,       // 降低
+            invasion: 6.0,              // 大幅提高：打入对方领地
+            liveInEnemyTerritory: 10.0, // 大幅提高：在对方领地内做出活形
+            borderFight: 5.0,           // 大幅提高：边界争夺
+            splitEnemy: 5.0,            // 大幅提高：分断对方棋群
+            deepInvasion: 4.0,          // 新增：深入对方腹地
+            enemyEyeDestroy: 3.0,       // 新增：破坏对方眼位
+            reduceEnemyTerritory: 2.0,  // 新增：减少对方领地
+            selfTerritoryAvoid: -3.0    // 新增：在己方腹地落子惩罚
         };
     }
 
@@ -302,6 +310,234 @@ class PolicyNetwork {
         return influence * this.weights.influence;
     }
 
+    // === 新增：入侵与边界评估 ===
+
+    // 检查落子点是否被对方棋子包围（对方领地内）- O(4)
+    isSurroundedByEnemy(boardArr, idx, color) {
+        const opponent = 3 - color;
+        const neighbors = this.getNeighborIndices(idx);
+        let enemyCount = 0, emptyCount = 0;
+        for (const n of neighbors) {
+            if (boardArr[n] === opponent) enemyCount++;
+            else if (boardArr[n] === 0) emptyCount++;
+        }
+        // 2个以上对方邻居且空位少 = 在对方势力范围内
+        return enemyCount >= 2 && emptyCount <= 1;
+    }
+
+    // 检查落子点是否在双方边界上 - O(8)
+    isBorderPoint(boardArr, idx, color) {
+        const opponent = 3 - color;
+        const neighbors = this.getNeighborIndices(idx);
+        let hasFriendly = false, hasEnemy = false, hasEmpty = false;
+        for (const n of neighbors) {
+            if (boardArr[n] === color) hasFriendly = true;
+            else if (boardArr[n] === opponent) hasEnemy = true;
+            else hasEmpty = true;
+        }
+        // 边界 = 同时接触双方棋子，或有空位在双方之间
+        return (hasFriendly && hasEnemy) || (hasEnemy && hasEmpty);
+    }
+
+    // 评估打入对方领地 - O(1)
+    evaluateInvasion(boardArr, testBoard, idx, color) {
+        const opponent = 3 - color;
+        const neighbors = this.getNeighborIndices(idx);
+        let enemyCount = 0, friendlyCount = 0, emptyCount = 0;
+        for (const n of neighbors) {
+            if (boardArr[n] === opponent) enemyCount++;
+            else if (boardArr[n] === color) friendlyCount++;
+            else emptyCount++;
+        }
+
+        let invasionScore = 0;
+
+        // 打入奖励：对方邻居越多奖励越高
+        if (enemyCount >= 2) {
+            // 基础打入奖励，friendlyCount越少奖励越高
+            const isolationBonus = friendlyCount === 0 ? 1.0 : (friendlyCount === 1 ? 0.6 : 0.3);
+            invasionScore += this.weights.invasion * isolationBonus;
+
+            // 在对方领地内做出眼位 = 极高奖励
+            const eyes = this.createsEyePotentialFast(boardArr, idx, color);
+            if (eyes > 0) {
+                invasionScore += eyes * this.weights.liveInEnemyTerritory;
+            }
+
+            // 如果落子后气数 >= 3，有活棋潜力
+            const { liberties } = this.countLibertiesFast(testBoard, idx);
+            if (liberties >= 3) {
+                invasionScore += this.weights.liveInEnemyTerritory * 0.4;
+            } else if (liberties === 2) {
+                invasionScore += this.weights.liveInEnemyTerritory * 0.15;
+            }
+
+            // 如果能提子 = 更强的打入（提子奖励已在前面计算，这里给额外加成）
+            if (emptyCount <= 1) {
+                invasionScore += this.weights.invasion * 0.3;
+            }
+        }
+
+        return invasionScore;
+    }
+
+    // 评估深入对方腹地 - 检查3x3范围内对方棋子密度
+    evaluateDeepInvasion(boardArr, idx, color) {
+        const opponent = 3 - color;
+        const row = Math.floor(idx / this.boardSize);
+        const col = idx % this.boardSize;
+        let enemyCount = 0, totalCount = 0;
+
+        for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+                if (dr === 0 && dc === 0) continue;
+                const nr = row + dr, nc = col + dc;
+                if (nr < 0 || nr >= this.boardSize || nc < 0 || nc >= this.boardSize) continue;
+                const ni = nr * this.boardSize + nc;
+                if (boardArr[ni] !== 0) {
+                    totalCount++;
+                    if (boardArr[ni] === opponent) enemyCount++;
+                }
+            }
+        }
+
+        // 3x3范围内对方密度高 = 深入腹地
+        if (totalCount >= 4 && enemyCount / totalCount >= 0.7) {
+            return this.weights.deepInvasion;
+        }
+        if (totalCount >= 3 && enemyCount === totalCount) {
+            return this.weights.deepInvasion * 0.7;
+        }
+        return 0;
+    }
+
+    // 评估是否破坏对方眼位 - 落子后让对方潜在眼位减少
+    evaluateEnemyEyeDestroy(boardArr, testBoard, idx, color) {
+        const opponent = 3 - color;
+        const neighbors = this.getNeighborIndices(idx);
+        let destroyed = 0;
+
+        for (const n of neighbors) {
+            // 检查邻居是否原本是对方的眼位（或潜在眼位），落子后不再是
+            if (boardArr[n] === 0) {
+                const wasEye = this.isEyePoint(boardArr, n, opponent);
+                const isEyeNow = this.isEyePoint(testBoard, n, opponent);
+                if (wasEye && !isEyeNow) {
+                    destroyed++;
+                }
+            }
+        }
+
+        return destroyed * this.weights.enemyEyeDestroy;
+    }
+
+    // 评估减少对方领地 - 在对方领地内落子
+    evaluateReduceEnemyTerritory(territoryMap, idx, color) {
+        if (!territoryMap) return 0;
+        const opponent = 3 - color;
+        // 如果落子点属于对方领地，就是减少对方领地
+        if (territoryMap[idx] === opponent) {
+            return this.weights.reduceEnemyTerritory;
+        }
+        return 0;
+    }
+
+    // 评估己方腹地惩罚 - 在己方完全控制的区域落子
+    evaluateSelfTerritoryAvoid(boardArr, idx, color) {
+        const neighbors = this.getNeighborIndices(idx);
+        let friendlyCount = 0, enemyCount = 0;
+        for (const n of neighbors) {
+            if (boardArr[n] === color) friendlyCount++;
+            else if (boardArr[n] === 3 - color) enemyCount++;
+        }
+        // 如果周围全是自己棋子且没有对方棋子 = 己方腹地，不该落子
+        if (friendlyCount >= 3 && enemyCount === 0) {
+            return this.weights.selfTerritoryAvoid;
+        }
+        return 0;
+    }
+
+    // 快速计算气数（不做完整group search，只算直接邻居空位）- O(4)
+    countLibertiesFast(boardArr, idx) {
+        const neighbors = this.getNeighborIndices(idx);
+        let liberties = 0;
+        for (const n of neighbors) {
+            if (boardArr[n] === 0) liberties++;
+        }
+        return { liberties };
+    }
+
+    // 评估边界争夺 - O(8)
+    evaluateBorderFight(boardArr, idx, color) {
+        const opponent = 3 - color;
+        const row = Math.floor(idx / this.boardSize);
+        const col = idx % this.boardSize;
+        let borderScore = 0;
+
+        // 检查3x3范围内双方棋子分布
+        let friendlyNearby = 0, enemyNearby = 0;
+        for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+                if (dr === 0 && dc === 0) continue;
+                const nr = row + dr, nc = col + dc;
+                if (nr < 0 || nr >= this.boardSize || nc < 0 || nc >= this.boardSize) continue;
+                const ni = nr * this.boardSize + nc;
+                if (boardArr[ni] === color) friendlyNearby++;
+                else if (boardArr[ni] === opponent) enemyNearby++;
+            }
+        }
+
+        // 双方都有棋子附近 = 边界线，争夺价值高
+        if (friendlyNearby > 0 && enemyNearby > 0) {
+            borderScore += this.weights.borderFight;
+            // 如果双方数量接近 = 关键边界点
+            if (Math.abs(friendlyNearby - enemyNearby) <= 1) {
+                borderScore += this.weights.borderFight * 0.5;
+            }
+        }
+
+        return borderScore;
+    }
+
+    // 评估分断对方 - O(4) 检查是否将对方的两个棋子/棋群分开
+    evaluateSplitEnemy(boardArr, testBoard, idx, color) {
+        const opponent = 3 - color;
+        const neighbors = this.getNeighborIndices(idx);
+
+        // 收集相邻的对方棋子所在的棋群代表
+        const enemyGroups = new Set();
+        for (const n of neighbors) {
+            if (boardArr[n] === opponent) {
+                // 找这个方向上的对方棋子是否被落子切断联系
+                enemyGroups.add(n);
+            }
+        }
+
+        // 如果相邻有2个以上的对方棋子，且它们现在被分开了
+        if (enemyGroups.size >= 2) {
+            // 检查这些对方棋子在落子后是否还连通
+            const enemyArr = Array.from(enemyGroups);
+            let split = false;
+            for (let i = 0; i < enemyArr.length; i++) {
+                for (let j = i + 1; j < enemyArr.length; j++) {
+                    // 如果两个对方棋子原本可以通过空位连通，现在被 idx 挡住了
+                    if (this.areAdjacent(enemyArr[i], enemyArr[j]) && testBoard[idx] === color) {
+                        split = true;
+                    }
+                }
+            }
+            if (split) return this.weights.splitEnemy;
+        }
+
+        return 0;
+    }
+
+    areAdjacent(idx1, idx2) {
+        const row1 = Math.floor(idx1 / this.boardSize), col1 = idx1 % this.boardSize;
+        const row2 = Math.floor(idx2 / this.boardSize), col2 = idx2 % this.boardSize;
+        return Math.abs(row1 - row2) <= 1 && Math.abs(col1 - col2) <= 1 && !(row1 === row2 && col1 === col2);
+    }
+
     // 评估某个位置的策略价值（高性能版）
     // territoryMap: 预计算的领地图，避免重复flood fill
     evaluatePosition(board, row, col, territoryMap = null) {
@@ -343,7 +579,7 @@ class PolicyNetwork {
         // 3. 自打吃惩罚
         if (myLiberties === 1) score += this.weights.selfAtari;
 
-        // 4. 打吃对方 - 只检查直接邻居的气
+        // 4. 打吃对方
         for (const n of neighbors) {
             if (boardArr[n] === opponent) {
                 const { liberties } = board.findGroupAndLiberties(boardArr, n);
@@ -362,7 +598,7 @@ class PolicyNetwork {
         // 6. 位置价值 - O(1)
         score += this.evaluatePositionalValue(row, col);
 
-        // 7. 连接价值
+        // 7. 连接价值（极低，避免占满自己的地）
         score += this.evaluateConnection(boardArr, i, player);
 
         // 8. 靠近对方棋子 - O(1)
@@ -370,24 +606,40 @@ class PolicyNetwork {
             if (boardArr[n] === opponent) score += this.weights.approach;
         }
 
-        // 9. 眼形评估 - O(1)
+        // === 9. 新增核心：入侵对方领地 ===
+        score += this.evaluateInvasion(boardArr, testBoard, i, player);
+
+        // === 10. 新增核心：深入对方腹地 ===
+        score += this.evaluateDeepInvasion(boardArr, i, player);
+
+        // === 11. 新增核心：破坏对方眼位 ===
+        score += this.evaluateEnemyEyeDestroy(boardArr, testBoard, i, player);
+
+        // === 12. 新增核心：减少对方领地 ===
+        score += this.evaluateReduceEnemyTerritory(territoryMap, i, player);
+
+        // === 13. 新增核心：己方腹地惩罚 ===
+        score += this.evaluateSelfTerritoryAvoid(boardArr, i, player);
+
+        // === 14. 新增核心：边界争夺 ===
+        score += this.evaluateBorderFight(boardArr, i, player);
+
+        // === 15. 新增核心：分断对方 ===
+        score += this.evaluateSplitEnemy(boardArr, testBoard, i, player);
+
+        // 16. 眼形评估 - 己方做眼奖励降低
         const eyesCreated = this.createsEyePotentialFast(boardArr, i, player);
         if (eyesCreated > 0) score += eyesCreated * this.weights.eyeCreation;
 
-        // 10. 棋群安全性 - O(1) per neighbor
+        // 17. 棋群安全性
         score += this.evaluateGroupSafetyFast(boardArr, i, player);
 
-        // 11. 领地填充惩罚 - O(1) with cached territory
+        // 18. 领地填充惩罚（极严厉）
         if (territoryMap && this.fillsOwnTerritoryFast(territoryMap, i, player)) {
             score += this.weights.territoryFill;
         }
 
-        // 12. 扩展奖励 - O(1)
-        if (this.isExpansionMoveFast(boardArr, i, player)) {
-            score += this.weights.expand;
-        }
-
-        // 13. 影响力评估 - O(25)
+        // 19. 影响力评估 - O(25)
         score += this.evaluateInfluenceFast(testBoard, i, player);
 
         return score;
@@ -437,11 +689,22 @@ class PolicyNetwork {
             this.evaluatePosition(board, move[0], move[1], territoryMap)
         );
 
-        // 过滤掉填眼的落子（除非所有落子都是填眼）
+        // 过滤掉填眼和在己方腹地无意义落子（除非所有落子都是）
         const nonEyeFillMoves = [];
         const nonEyeFillScores = [];
         for (let i = 0; i < validMoves.length; i++) {
-            if (scores[i] > this.weights.eyeFill) {
+            const isEyeFill = scores[i] <= this.weights.eyeFill;
+            // 中盘阶段（30-120手），额外过滤掉完全在己方腹地且无战略价值的落子
+            let isBadFill = false;
+            if (!isEyeFill && board.moveCount > 30 && board.moveCount < 120 && territoryMap) {
+                const move = validMoves[i];
+                const mi = board.idx(move[0], move[1]);
+                // 如果落在己方领地，且总分低于一个阈值（说明没有入侵/分断等价值）
+                if (territoryMap[mi] === board.currentPlayer && scores[i] < -2.0) {
+                    isBadFill = true;
+                }
+            }
+            if (!isEyeFill && !isBadFill) {
                 nonEyeFillMoves.push(validMoves[i]);
                 nonEyeFillScores.push(scores[i]);
             }
@@ -484,22 +747,39 @@ class PolicyNetwork {
         const w = this.weights;
         if (isWin) {
             w.eyeShape += lr * 0.02;
-            w.eyeCreation += lr * 0.02;
-            w.eyeFill -= lr * 0.01;
-            w.territoryFill -= lr * 0.01;
-            w.groupSafety += lr * 0.02;
-            w.expand += lr * 0.01;
+            w.eyeCreation += lr * 0.01;
+            w.eyeFill -= lr * 0.015;
+            w.territoryFill -= lr * 0.02;
+            w.groupSafety += lr * 0.01;
+            w.expand -= lr * 0.01;
+            w.invasion += lr * 0.03;
+            w.liveInEnemyTerritory += lr * 0.03;
+            w.borderFight += lr * 0.02;
+            w.splitEnemy += lr * 0.02;
+            w.deepInvasion += lr * 0.02;
+            w.enemyEyeDestroy += lr * 0.02;
+            w.reduceEnemyTerritory += lr * 0.01;
+            w.selfTerritoryAvoid -= lr * 0.02;
+            w.connection -= lr * 0.01;
         } else {
             w.eyeShape += lr * 0.03;
-            w.eyeCreation += lr * 0.03;
-            w.eyeFill -= lr * 0.02;
-            w.territoryFill -= lr * 0.02;
-            w.groupSafety += lr * 0.03;
-            w.connection -= lr * 0.01;
-            w.expand += lr * 0.02;
+            w.eyeCreation += lr * 0.02;
+            w.eyeFill -= lr * 0.025;
+            w.territoryFill -= lr * 0.03;
+            w.groupSafety += lr * 0.02;
+            w.expand -= lr * 0.015;
+            w.invasion += lr * 0.04;
+            w.liveInEnemyTerritory += lr * 0.04;
+            w.borderFight += lr * 0.03;
+            w.splitEnemy += lr * 0.03;
+            w.deepInvasion += lr * 0.03;
+            w.enemyEyeDestroy += lr * 0.03;
+            w.reduceEnemyTerritory += lr * 0.02;
+            w.selfTerritoryAvoid -= lr * 0.03;
+            w.connection -= lr * 0.02;
         }
         const keys = Object.keys(w);
-        for (const key of keys) w[key] = Math.max(-5, Math.min(5, w[key]));
+        for (const key of keys) w[key] = Math.max(-5, Math.min(5, this.weights[key]));
     }
 
     applyReward(gameMoves, winner) {
