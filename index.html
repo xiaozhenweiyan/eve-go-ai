@@ -45,6 +45,7 @@
                     <select id="watch-ai">
                         <option value="">-- 自动 (Top胜率) --</option>
                     </select>
+                    <button id="btn-territory" class="toggle-btn">显示领地</button>
                     <span id="watch-status">自动模式 (Top胜率)</span>
                 </div>
             </div>
@@ -60,6 +61,7 @@
                         <p>状态: <span id="training-status">空闲</span></p>
                         <p>总对局: <span id="total-games">0</span></p>
                         <p>当前代: <span id="generation">0</span></p>
+                        <p>活跃种族: <span id="active-species">20</span></p>
                     </div>
                     <div class="speed-control">
                         <label>速度:</label>
@@ -67,7 +69,7 @@
                         <span id="speed-value">5</span>
                     </div>
                     <div class="genetic-settings">
-                        <label>种群: 200</label>
+                        <label>种群: 200 (20种族)</label>
                         <label>进化间隔: 每10局</label>
                     </div>
                 </div>
@@ -89,6 +91,7 @@
                         <div class="leaderboard-header">
                             <span>排名</span>
                             <span>名称</span>
+                            <span>种族</span>
                             <span>胜率</span>
                             <span>对局</span>
                         </div>
@@ -106,6 +109,11 @@
                     <span class="legend-item"><span class="dot" style="background:rgba(255,255,255,0.3)"></span> 其他</span>
                     <span class="legend-item"><span class="dot" style="background:#ffaa00"></span> 平均值</span>
                 </div>
+
+                <h3 style="margin-top:20px;">种族人口变化 (堆叠面积图)</h3>
+                <canvas id="species-chart-canvas" width="900" height="280"></canvas>
+                <div id="species-legend"></div>
+
                 <div id="training-log">
                     <h4>进化日志</h4>
                     <div id="log-content"></div>

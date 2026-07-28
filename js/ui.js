@@ -7,6 +7,8 @@ class GoUI {
         this.ctxB = this.canvasB.getContext('2d');
         this.chartCanvas = document.getElementById('chart-canvas');
         this.chartCtx = this.chartCanvas.getContext('2d');
+        this.speciesChartCanvas = document.getElementById('species-chart-canvas');
+        this.speciesChartCtx = this.speciesChartCanvas.getContext('2d');
 
         this.trainer = new EveTrainer(this.boardSize, 200);
         this.mode = 'training';
@@ -18,7 +20,25 @@ class GoUI {
         this.offset = 20;
         this.stoneRadius = 9;
 
+        // 领地显示开关
+        this.showTerritory = false;
+
+        // 种族颜色
+        this.speciesColors = this.generateSpeciesColors(30);
+
         this.init();
+    }
+
+    generateSpeciesColors(count) {
+        const colors = [];
+        const baseHues = [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330,
+                          15, 45, 75, 105, 135, 165, 195, 225, 255, 285, 315, 345,
+                          10, 50, 100, 140, 200, 260];
+        for (let i = 0; i < count; i++) {
+            const hue = baseHues[i] || (i * 37) % 360;
+            colors.push(`hsla(${hue}, 70%, 55%, 0.7)`);
+        }
+        return colors;
     }
 
     init() {
@@ -28,29 +48,25 @@ class GoUI {
         this.populateAiSelect();
         this.loadLatestModel();
         this.drawChart();
-        this.log('Eve 200 AI 进化系统已就绪', 'info');
+        this.drawSpeciesChart();
+        this.log('Eve 200 AI 进化系统已就绪 (20种族)', 'info');
     }
 
     setupEventListeners() {
-        // Canvas点击（人机对战）
         this.canvasA.addEventListener('click', (e) => this.handleBoardClick(e));
 
-        // 模式切换
         document.getElementById('btn-training').addEventListener('click', () => this.switchMode('training'));
         document.getElementById('btn-play').addEventListener('click', () => this.switchMode('play'));
 
-        // 训练控制
         document.getElementById('btn-start-training').addEventListener('click', () => this.startTraining());
         document.getElementById('btn-stop-training').addEventListener('click', () => this.stopTraining());
         document.getElementById('btn-pause-training').addEventListener('click', () => this.pauseTraining());
         document.getElementById('btn-save-model').addEventListener('click', () => this.saveModel());
 
-        // 对战控制
         document.getElementById('btn-reset-game').addEventListener('click', () => this.resetGame());
         document.getElementById('btn-pass').addEventListener('click', () => this.pass());
         document.getElementById('btn-ai-move').addEventListener('click', () => this.aiMove());
 
-        // 速度滑块
         const speedSlider = document.getElementById('speed-slider');
         speedSlider.addEventListener('input', (e) => {
             const speed = parseInt(e.target.value);
@@ -58,7 +74,6 @@ class GoUI {
             this.trainer.setSpeed(speed);
         });
 
-        // AI选择下拉框
         document.getElementById('watch-ai').addEventListener('change', (e) => {
             const val = e.target.value;
             if (val !== '') {
@@ -74,7 +89,14 @@ class GoUI {
             }
         });
 
-        // 上传/加载
+        // 领地显示开关
+        document.getElementById('btn-territory').addEventListener('click', () => {
+            this.showTerritory = !this.showTerritory;
+            const btn = document.getElementById('btn-territory');
+            btn.textContent = this.showTerritory ? '隐藏领地' : '显示领地';
+            btn.classList.toggle('active', this.showTerritory);
+        });
+
         document.getElementById('model-upload').addEventListener('change', (e) => this.handleFileUpload(e));
         document.getElementById('btn-upload-model').addEventListener('click', () => this.uploadModel());
         document.getElementById('btn-load-model').addEventListener('click', () => this.loadModel());
@@ -86,7 +108,8 @@ class GoUI {
         for (let i = 0; i < this.trainer.populationSize; i++) {
             const opt = document.createElement('option');
             opt.value = i;
-            opt.textContent = this.trainer.population[i].name;
+            const p = this.trainer.population[i];
+            opt.textContent = `${p.name} (S${p.species})`;
             select.appendChild(opt);
         }
     }
@@ -178,6 +201,33 @@ class GoUI {
             ctx.fillStyle = '#ff0000';
             ctx.fill();
         }
+
+        // 领地显示
+        if (this.showTerritory) {
+            this.drawTerritory(ctx, board);
+        }
+    }
+
+    // 绘制领地覆盖层
+    drawTerritory(ctx, board) {
+        const territory = board.calculateTerritoryDetail();
+        for (let row = 0; row < this.boardSize; row++) {
+            for (let col = 0; col < this.boardSize; col++) {
+                const owner = territory.map[board.idx(row, col)];
+                if (owner > 0 && board.board[board.idx(row, col)] === 0) {
+                    const x = this.offset + col * this.cellSize;
+                    const y = this.offset + row * this.cellSize;
+                    ctx.beginPath();
+                    ctx.arc(x, y, 3, 0, Math.PI * 2);
+                    if (owner === 1) {
+                        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+                    } else {
+                        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                    }
+                    ctx.fill();
+                }
+            }
+        }
     }
 
     drawStone(ctx, row, col, color) {
@@ -206,7 +256,7 @@ class GoUI {
         document.getElementById('btn-stop-training').disabled = false;
         document.getElementById('btn-pause-training').disabled = false;
         document.getElementById('training-status').textContent = '进化中';
-        this.log('200 AI 进化训练开始！', 'info');
+        this.log('200 AI 进化训练开始！ (20种族)', 'info');
 
         this.trainer.onBoardUpdate = (data) => this.handleBoardUpdate(data);
         this.trainer.onMatchEnd = (data) => this.handleMatchEnd(data);
@@ -237,7 +287,6 @@ class GoUI {
     }
 
     handleBoardUpdate(data) {
-        // 棋盘A：精选对局（ watched AI 或 Top AI）
         if (data.showcaseA && data.showcaseA.board) {
             const board = new GoBoard(this.boardSize);
             board.setState(data.showcaseA.board);
@@ -247,10 +296,9 @@ class GoUI {
             document.getElementById('black-score-a').textContent = data.showcaseA.blackScore.toFixed(1);
             document.getElementById('white-score-a').textContent = data.showcaseA.whiteScore.toFixed(1);
             document.getElementById('match-info-a').textContent =
-                `${data.showcaseA.blackName} vs ${data.showcaseA.whiteName} 第${data.showcaseA.moveCount}手`;
+                `${data.showcaseA.blackName}(S${data.showcaseA.blackSpecies}) vs ${data.showcaseA.whiteName}(S${data.showcaseA.whiteSpecies}) 第${data.showcaseA.moveCount}手`;
         }
 
-        // 棋盘B：Top1 vs Top2 模拟对局
         if (data.showcaseB && data.showcaseB.board) {
             const board = new GoBoard(this.boardSize);
             board.setState(data.showcaseB.board);
@@ -260,7 +308,7 @@ class GoUI {
             document.getElementById('black-score-b').textContent = data.showcaseB.blackScore.toFixed(1);
             document.getElementById('white-score-b').textContent = data.showcaseB.whiteScore.toFixed(1);
             document.getElementById('match-info-b').textContent =
-                `${data.showcaseB.blackName} vs ${data.showcaseB.whiteName} 第${data.showcaseB.moveCount}手`;
+                `${data.showcaseB.blackName}(S${data.showcaseB.blackSpecies}) vs ${data.showcaseB.whiteName}(S${data.showcaseB.whiteSpecies}) 第${data.showcaseB.moveCount}手`;
         }
 
         document.getElementById('total-games').textContent = data.totalGames;
@@ -268,15 +316,19 @@ class GoUI {
 
     handleMatchEnd(data) {
         const prefix = data.isShowcase ? '[展示]' : '[后台]';
+        const suffix = data.resigned ? ' (投子认输)' : '';
         const w = data.winner === 1 ? data.black : data.winner === 2 ? data.white : '平局';
-        this.log(`${prefix} #${data.totalGames} ${data.black} vs ${data.white} -> ${w}`, 'info');
+        this.log(`${prefix} #${data.totalGames} ${data.black} vs ${data.white} -> ${w}${suffix}`, 'info');
     }
 
     handleStatsUpdate(stats) {
         document.getElementById('generation').textContent = stats.generation;
         document.getElementById('total-games').textContent = stats.totalGames;
+        document.getElementById('active-species').textContent =
+            stats.speciesSummary ? stats.speciesSummary.length : 20;
         this.updateLeaderboard(stats.top10);
         this.drawChart();
+        this.drawSpeciesChart();
         this.populateAiSelect();
     }
 
@@ -287,9 +339,11 @@ class GoUI {
             const div = document.createElement('div');
             div.className = 'leaderboard-row';
             if (this.trainer.watchedAiIdx === item.idx) div.classList.add('selected');
+            const speciesColor = this.speciesColors[item.species] || '#888';
             div.innerHTML = `
                 <span class="rank">${idx + 1}</span>
                 <span class="name">${item.name}</span>
+                <span class="species-tag" style="background:${speciesColor}">S${item.species}</span>
                 <span class="winrate">${(item.winRate * 100).toFixed(1)}%</span>
                 <span class="games">${item.totalGames}</span>
             `;
@@ -326,7 +380,6 @@ class GoUI {
         const h = H - pad * 2;
         const stepX = history.length > 1 ? w / (history.length - 1) : 0;
 
-        // 网格
         ctx.strokeStyle = 'rgba(255,255,255,0.08)';
         ctx.lineWidth = 1;
         for (let i = 0; i <= 5; i++) {
@@ -337,7 +390,6 @@ class GoUI {
             ctx.stroke();
         }
 
-        // Y轴标签
         ctx.fillStyle = '#888';
         ctx.font = '10px sans-serif';
         ctx.textAlign = 'right';
@@ -346,7 +398,7 @@ class GoUI {
             ctx.fillText(`${100 - i * 20}%`, pad - 6, y + 3);
         }
 
-        // 1. 画所有200个AI的胜率（半透明细线）
+        // 所有200个AI的胜率（半透明细线）
         ctx.globalAlpha = 0.08;
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 0.5;
@@ -362,7 +414,7 @@ class GoUI {
         }
         ctx.globalAlpha = 1;
 
-        // 2. 画Top 10的胜率（亮色线）
+        // Top 10
         const colors = ['#00d2ff', '#00ff88', '#ff6b6b', '#ffd93d', '#a855f7',
                         '#f472b6', '#38bdf8', '#fb923c', '#a3e635', '#22d3ee'];
         for (let rank = 0; rank < 10; rank++) {
@@ -378,7 +430,7 @@ class GoUI {
             ctx.stroke();
         }
 
-        // 3. 画平均胜率（橙色粗线）
+        // 平均胜率
         ctx.strokeStyle = '#ffaa00';
         ctx.lineWidth = 2.5;
         ctx.beginPath();
@@ -390,7 +442,7 @@ class GoUI {
         }
         ctx.stroke();
 
-        // 4. 画中位数（虚线）
+        // 中位数
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 1.5;
         ctx.setLineDash([4, 4]);
@@ -403,6 +455,106 @@ class GoUI {
         }
         ctx.stroke();
         ctx.setLineDash([]);
+
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#888';
+        const labelStep = Math.max(1, Math.floor(history.length / 8));
+        for (let g = 0; g < history.length; g += labelStep) {
+            const x = pad + g * stepX;
+            ctx.fillText(`G${history[g].generation}`, x, H - 15);
+        }
+
+        ctx.fillStyle = '#00d2ff';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('Top 10 + 全部平均 + 中位数', pad, 22);
+    }
+
+    // ===== 种族人口堆叠面积图 =====
+    drawSpeciesChart() {
+        const ctx = this.speciesChartCtx;
+        const W = this.speciesChartCanvas.width;
+        const H = this.speciesChartCanvas.height;
+        ctx.clearRect(0, 0, W, H);
+
+        const history = this.trainer.speciesHistory;
+        if (history.length === 0) {
+            ctx.fillStyle = '#666';
+            ctx.font = '14px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('暂无数据 - 开始进化后显示种族人口变化', W / 2, H / 2);
+            return;
+        }
+
+        const pad = 50;
+        const w = W - pad * 2;
+        const h = H - pad * 2;
+        const stepX = history.length > 1 ? w / (history.length - 1) : 0;
+        const maxTotal = this.trainer.populationSize; // 200
+
+        // 网格
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 4; i++) {
+            const y = pad + (h / 4) * i;
+            ctx.beginPath();
+            ctx.moveTo(pad, y);
+            ctx.lineTo(W - pad, y);
+            ctx.stroke();
+        }
+
+        // Y轴标签
+        ctx.fillStyle = '#888';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'right';
+        for (let i = 0; i <= 4; i++) {
+            const y = pad + (h / 4) * i;
+            const val = Math.round(maxTotal * (1 - i / 4));
+            ctx.fillText(`${val}`, pad - 6, y + 3);
+        }
+
+        // 找出活跃种族
+        const activeSpecies = new Set();
+        for (const snap of history) {
+            for (let s = 0; s < snap.populations.length; s++) {
+                if (snap.populations[s] > 0) activeSpecies.add(s);
+            }
+        }
+        const speciesList = Array.from(activeSpecies).sort((a, b) => a - b);
+
+        // 绘制堆叠面积
+        for (const s of speciesList) {
+            const color = this.speciesColors[s] || 'rgba(128,128,128,0.5)';
+
+            // 计算堆叠的底部和顶部
+            ctx.beginPath();
+            // 底部路径（从左到右）
+            for (let g = 0; g < history.length; g++) {
+                const x = pad + g * stepX;
+                let stackBottom = 0;
+                for (const s2 of speciesList) {
+                    if (s2 >= s) break;
+                    stackBottom += history[g].populations[s2] || 0;
+                }
+                const y = pad + h * (1 - stackBottom / maxTotal);
+                if (g === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            // 顶部路径（从右到左）
+            for (let g = history.length - 1; g >= 0; g--) {
+                const x = pad + g * stepX;
+                let stackTop = 0;
+                for (const s2 of speciesList) {
+                    if (s2 > s) break;
+                    stackTop += history[g].populations[s2] || 0;
+                }
+                const y = pad + h * (1 - stackTop / maxTotal);
+                ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+            ctx.fillStyle = color;
+            ctx.fill();
+        }
 
         // X轴标签
         ctx.textAlign = 'center';
@@ -417,7 +569,23 @@ class GoUI {
         ctx.fillStyle = '#00d2ff';
         ctx.font = 'bold 12px sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillText('Top 10 + 全部平均 + 中位数', pad, 22);
+        ctx.fillText(`种族人口分布 (${speciesList.length}个活跃种族)`, pad, 22);
+
+        // 更新图例
+        this.updateSpeciesLegend(speciesList);
+    }
+
+    updateSpeciesLegend(speciesList) {
+        const legend = document.getElementById('species-legend');
+        legend.innerHTML = '';
+        for (const s of speciesList) {
+            const span = document.createElement('span');
+            span.className = 'legend-item';
+            const color = this.speciesColors[s] || 'rgba(128,128,128,0.5)';
+            const pop = this.trainer.speciesStats[s] ? this.trainer.speciesStats[s].population : 0;
+            span.innerHTML = `<span class="dot" style="background:${color}"></span> S${s}(${pop})`;
+            legend.appendChild(span);
+        }
     }
 
     // ===== 人机对战 =====
@@ -514,8 +682,11 @@ class GoUI {
             const stats = this.trainer.getStats();
             document.getElementById('generation').textContent = stats.generation;
             document.getElementById('total-games').textContent = stats.totalGames;
+            document.getElementById('active-species').textContent =
+                stats.speciesSummary ? stats.speciesSummary.length : 20;
             this.updateLeaderboard(stats.top10);
             this.drawChart();
+            this.drawSpeciesChart();
             this.populateAiSelect();
             this.log(`已加载模型 (第${stats.generation}代, ${stats.totalGames}局)`, 'success');
         }
@@ -536,8 +707,11 @@ class GoUI {
                         const stats = this.trainer.getStats();
                         document.getElementById('generation').textContent = stats.generation;
                         document.getElementById('total-games').textContent = stats.totalGames;
+                        document.getElementById('active-species').textContent =
+                            stats.speciesSummary ? stats.speciesSummary.length : 20;
                         this.updateLeaderboard(stats.top10);
                         this.drawChart();
+                        this.drawSpeciesChart();
                         this.populateAiSelect();
                         this.log('模型加载成功', 'success');
                     } catch (err) {
@@ -582,8 +756,11 @@ class GoUI {
                 const stats = this.trainer.getStats();
                 document.getElementById('generation').textContent = stats.generation;
                 document.getElementById('total-games').textContent = stats.totalGames;
+                document.getElementById('active-species').textContent =
+                    stats.speciesSummary ? stats.speciesSummary.length : 20;
                 this.updateLeaderboard(stats.top10);
                 this.drawChart();
+                this.drawSpeciesChart();
                 this.populateAiSelect();
                 document.getElementById('upload-status').textContent = '上传成功！';
                 this.log('模型上传成功', 'success');

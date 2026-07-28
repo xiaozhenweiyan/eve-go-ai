@@ -1,4 +1,4 @@
-// Eve 种群进化训练器 - 200个AI互相随机对战
+// Eve 种群进化训练器 - 200个AI / 20种族 互相随机对战
 class EveTrainer {
     constructor(boardSize = 19, populationSize = 200) {
         this.boardSize = boardSize;
@@ -7,6 +7,11 @@ class EveTrainer {
 
         // 200个AI种群
         this.population = [];
+        this.speciesCount = 20;
+        this.maxSpecies = 30;
+        this.speciesBaseWeights = [];
+        this.speciesStats = [];
+        this.speciesHistory = []; // 种族数量历史（用于图表）
         this.initPopulation();
 
         // 当前最佳（人机对战用）
@@ -15,25 +20,24 @@ class EveTrainer {
         this.mcts.setPolicyNetwork(this.population[0].network);
 
         // 训练状态
-        this.generation = 0;      // 遗传代数
-        this.totalGames = 0;      // 总对局数
+        this.generation = 0;
+        this.totalGames = 0;
         this.isTraining = false;
         this.isPaused = false;
         this.trainingSpeed = 5;
 
-        // 观看目标：-1 = 自动(Top AI), >=0 = 指定AI索引
+        // 观看目标
         this.watchedAiIdx = -1;
 
-        // 后台对局计数器（用于控制展示对局频率）
+        // 后台/展示对局
         this.backgroundCount = 0;
-        this.showcaseInterval = 3; // 每3局后台对局后运行1局展示对局
+        this.showcaseInterval = 3;
 
-        // 当前展示对局（用于UI显示）
-        this.showcaseMatchA = null;   // 棋盘A：精选对局
-        this.showcaseMatchB = null;   // 棋盘B：Top1 vs Top2 模拟
+        this.showcaseMatchA = null;
+        this.showcaseMatchB = null;
 
-        // 历史快照（用于图表）
-        this.winRateHistory = [];   // 每N局记录一次所有AI的胜率
+        // 历史快照
+        this.winRateHistory = [];
 
         // 回调
         this.onBoardUpdate = null;
@@ -44,32 +48,62 @@ class EveTrainer {
 
     initPopulation() {
         this.population = [];
+        this.speciesBaseWeights = [];
+
+        // 创建20个种族的基础参数模板
+        for (let s = 0; s < this.speciesCount; s++) {
+            const baseNet = new PolicyNetwork(this.boardSize);
+            // 给每个种族不同的初始参数
+            this.ga.mutate(baseNet, 0.4);
+            this.speciesBaseWeights.push({ ...baseNet.weights });
+        }
+
+        // 每个种族10个AI
+        const perSpecies = Math.floor(this.populationSize / this.speciesCount);
         for (let i = 0; i < this.populationSize; i++) {
+            const species = i % this.speciesCount;
+            const network = new PolicyNetwork(this.boardSize);
+            network.weights = { ...this.speciesBaseWeights[species] };
+            // 种族内小变异
+            this.ga.mutate(network, 0.05);
+
             this.population.push({
                 name: `G${i + 1}`,
-                network: new PolicyNetwork(this.boardSize),
-                wins: 0,
-                losses: 0,
-                draws: 0,
-                totalGames: 0,
-                winRate: 0,
-                fitness: 0,
+                network: network,
+                species: species,
+                wins: 0, losses: 0, draws: 0,
+                totalGames: 0, winRate: 0, fitness: 0,
                 generation: 0
             });
+        }
+
+        // 初始化种族统计
+        this.speciesStats = [];
+        for (let s = 0; s < this.maxSpecies; s++) {
+            const count = s < this.speciesCount ? perSpecies : 0;
+            this.speciesStats.push({
+                population: count,
+                totalWins: 0,
+                totalLosses: 0,
+                totalGames: 0,
+                winRate: 0.5,
+                losingStreak: 0
+            });
+        }
+        // 修正最后一个种族的数量
+        const remainder = this.populationSize - perSpecies * this.speciesCount;
+        for (let i = 0; i < remainder; i++) {
+            this.speciesStats[i].population++;
         }
     }
 
     setSpeed(speed) { this.trainingSpeed = speed; }
-
-    setWatchedAi(idx) {
-        this.watchedAiIdx = idx;
-    }
+    setWatchedAi(idx) { this.watchedAiIdx = idx; }
 
     getMoveDelay() {
         return Math.max(0, 180 - this.trainingSpeed * 18);
     }
 
-    // 获取按胜率排序的索引
     getSortedIndices() {
         return this.population
             .map((p, i) => ({ idx: i, winRate: p.winRate, fitness: p.fitness, totalGames: p.totalGames }))
@@ -81,7 +115,6 @@ class EveTrainer {
         return this.getSortedIndices().slice(0, n);
     }
 
-    // 随机选择对手（确保不同）
     selectRandomOpponents() {
         let idx1 = Math.floor(Math.random() * this.populationSize);
         let idx2 = Math.floor(Math.random() * this.populationSize);
@@ -91,19 +124,12 @@ class EveTrainer {
         return [idx1, idx2];
     }
 
-    // 选择展示对局的对手（高胜率AI或 watched AI）
     selectShowcaseOpponents() {
-        // 如果有 watched AI，优先让它参与
         if (this.watchedAiIdx >= 0 && this.watchedAiIdx < this.populationSize) {
             const otherIdx = this.selectRandomOpponentExcluding(this.watchedAiIdx);
-            if (Math.random() < 0.5) {
-                return [this.watchedAiIdx, otherIdx];
-            } else {
-                return [otherIdx, this.watchedAiIdx];
-            }
+            if (Math.random() < 0.5) return [this.watchedAiIdx, otherIdx];
+            return [otherIdx, this.watchedAiIdx];
         }
-
-        // 否则从Top 10中选择两个对战
         const top = this.getTopIndices(10);
         const i1 = top[Math.floor(Math.random() * Math.min(5, top.length))];
         let i2 = top[Math.floor(Math.random() * top.length)];
@@ -112,9 +138,7 @@ class EveTrainer {
             i2 = top[Math.floor(Math.random() * top.length)];
             safety++;
         }
-        if (i2 === i1) {
-            i2 = this.selectRandomOpponentExcluding(i1);
-        }
+        if (i2 === i1) i2 = this.selectRandomOpponentExcluding(i1);
         return [i1, i2];
     }
 
@@ -126,6 +150,17 @@ class EveTrainer {
             safety++;
         }
         return idx;
+    }
+
+    // 检查是否应该投子认输
+    shouldResign(board) {
+        if (board.moveCount < 60) return false;
+        const score = board.calculateScore();
+        const diff = board.currentPlayer === 1
+            ? score.white - score.black
+            : score.black - score.white;
+        // 落后超过35目且棋局已过60手，认输
+        return diff > 35;
     }
 
     // 主训练循环
@@ -141,8 +176,6 @@ class EveTrainer {
             }
 
             let idx1, idx2, result;
-
-            // 决定运行后台对局还是展示对局
             const runShowcase = this.backgroundCount >= this.showcaseInterval;
 
             if (runShowcase) {
@@ -156,36 +189,30 @@ class EveTrainer {
             }
 
             this.totalGames++;
-
-            // 更新统计
             this.updateStats(idx1, idx2, result);
 
-            // 更新最佳模型（人机对战用）
             const topIdx = this.getSortedIndices()[0];
             if (topIdx !== this.bestIdx) {
                 this.bestIdx = topIdx;
                 this.mcts.setPolicyNetwork(this.population[topIdx].network);
             }
 
-            // 每10局：遗传进化 + 保存胜率快照
             if (this.totalGames % 10 === 0) {
                 this.generation++;
                 this.saveWinRateSnapshot();
+                this.saveSpeciesSnapshot();
                 await this.geneticEvolve();
                 if (this.onStatsUpdate) this.onStatsUpdate(this.getStats());
             }
 
-            // 每5局更新一次排行榜
             if (this.totalGames % 5 === 0) {
                 if (this.onStatsUpdate) this.onStatsUpdate(this.getStats());
             }
 
-            // 每50局自动保存
             if (this.totalGames % 50 === 0) {
                 this.saveToLocalStorage();
             }
 
-            // 小暂停让UI响应
             await new Promise(r => setTimeout(r, 2));
         }
 
@@ -207,10 +234,16 @@ class EveTrainer {
         const board = new GoBoard(this.boardSize);
         const blackNet = this.population[idx1].network;
         const whiteNet = this.population[idx2].network;
-        const maxMoves = 220;
         let passes = 0;
+        let resigned = 0;
 
-        for (let step = 0; step < maxMoves; step++) {
+        for (let step = 0; step < 500; step++) {
+            // 检查投子认输
+            if (this.shouldResign(board)) {
+                resigned = board.currentPlayer;
+                break;
+            }
+
             const validMoves = board.getValidMovesFast();
 
             if (validMoves.length === 0) {
@@ -220,7 +253,8 @@ class EveTrainer {
                 continue;
             }
 
-            if (step > 180 && validMoves.length < 5) {
+            // 没有有价值的棋可下时主动pass
+            if (step > 100 && validMoves.length < 3) {
                 board.pass();
                 passes++;
                 if (passes >= 2) break;
@@ -228,7 +262,6 @@ class EveTrainer {
             }
 
             passes = 0;
-
             const currentNet = board.currentPlayer === 1 ? blackNet : whiteNet;
             const move = currentNet.selectMove(board, validMoves, 0.1);
 
@@ -241,25 +274,22 @@ class EveTrainer {
 
             board.makeMove(move[0], move[1]);
 
-            // 每10步让出一次UI线程
-            if (step % 10 === 0) {
-                await new Promise(r => setTimeout(r, 0));
-            }
+            if (step % 10 === 0) await new Promise(r => setTimeout(r, 0));
         }
 
-        if (!board.isGameOver()) {
-            board.pass();
-            board.pass();
+        let winner;
+        if (resigned > 0) {
+            winner = 3 - resigned;
+        } else {
+            if (!board.isGameOver()) { board.pass(); board.pass(); }
+            winner = board.getWinner();
         }
 
-        const winner = board.getWinner();
         const score = board.calculateScore();
-
-        // 强化学习
         blackNet.learnFromResult(winner === 1);
         whiteNet.learnFromResult(winner === 2);
 
-        return { winner, score, moves: board.moveCount };
+        return { winner, score, moves: board.moveCount, resigned: resigned > 0 };
     }
 
     // 展示对局：正常速度，更新两个棋盘
@@ -270,10 +300,9 @@ class EveTrainer {
 
         this.showcaseMatchA = { blackIdx: idx1, whiteIdx: idx2, board: boardA };
 
-        // 棋盘B：Top1 vs Top2 模拟对局
+        // 棋盘B：Top1 vs Top2
         const topIndices = this.getTopIndices(2);
         const boardB = new GoBoard(this.boardSize);
-        // 确保两个Top AI不同
         let topBWhiteIdx = topIndices[1];
         if (topBWhiteIdx === topIndices[0]) {
             topBWhiteIdx = this.selectRandomOpponentExcluding(topIndices[0]);
@@ -284,25 +313,30 @@ class EveTrainer {
             board: boardB
         };
 
-        const maxMoves = 220;
         let moveCount = 0;
         let passesA = 0;
+        let resigned = 0;
 
-        for (let step = 0; step < maxMoves && this.isTraining && !this.isPaused; step++) {
-            // === 棋盘A：精选对局走一步 ===
+        for (let step = 0; step < 500 && this.isTraining && !this.isPaused; step++) {
+            // 检查投子认输
+            if (this.shouldResign(boardA)) {
+                resigned = boardA.currentPlayer;
+                break;
+            }
+
             const validMovesA = boardA.getValidMovesFast();
             if (validMovesA.length === 0) {
                 boardA.pass();
                 passesA++;
                 if (passesA >= 2) break;
-            } else if (step > 180 && validMovesA.length < 5) {
+            } else if (step > 100 && validMovesA.length < 3) {
                 boardA.pass();
                 passesA++;
                 if (passesA >= 2) break;
             } else {
                 passesA = 0;
                 const currentNetA = boardA.currentPlayer === 1 ? black.network : white.network;
-                const temperature = Math.max(0.05, 0.5 - step / 350);
+                const temperature = Math.max(0.05, 0.5 - step / 400);
                 const moveA = currentNetA.selectMove(boardA, validMovesA, temperature);
                 if (moveA) {
                     boardA.makeMove(moveA[0], moveA[1]);
@@ -313,12 +347,9 @@ class EveTrainer {
                 }
             }
 
-            // === 棋盘B：Top模拟对局同步走一步 ===
             this.simulateShowcaseBStep();
-
             moveCount++;
 
-            // 通知UI更新两个棋盘
             if (this.onBoardUpdate) {
                 this.onBoardUpdate({
                     showcaseA: this.getShowcaseAState(),
@@ -336,15 +367,15 @@ class EveTrainer {
             }
         }
 
-        if (!boardA.isGameOver()) {
-            boardA.pass();
-            boardA.pass();
+        let winner;
+        if (resigned > 0) {
+            winner = 3 - resigned;
+        } else {
+            if (!boardA.isGameOver()) { boardA.pass(); boardA.pass(); }
+            winner = boardA.getWinner();
         }
 
-        const winner = boardA.getWinner();
         const score = boardA.calculateScore();
-
-        // 强化学习
         black.network.learnFromResult(winner === 1);
         white.network.learnFromResult(winner === 2);
 
@@ -356,25 +387,31 @@ class EveTrainer {
                 score: score,
                 moves: moveCount,
                 totalGames: this.totalGames,
-                isShowcase: true
+                isShowcase: true,
+                resigned: resigned > 0,
+                resigner: resigned
             });
         }
 
-        // 重置棋盘B以便下一场展示对局
         this.showcaseMatchB = null;
-
-        return { winner, score, moves: moveCount };
+        return { winner, score, moves: moveCount, resigned: resigned > 0 };
     }
 
-    // 棋盘B走一步（Top AI模拟）
     simulateShowcaseBStep() {
         if (!this.showcaseMatchB) return;
         const tm = this.showcaseMatchB;
         const board = tm.board;
         if (board.isGameOver()) return;
 
+        // 检查认输
+        if (this.shouldResign(board)) {
+            board.pass();
+            board.pass();
+            return;
+        }
+
         const validMoves = board.getValidMovesFast();
-        if (validMoves.length === 0) {
+        if (validMoves.length === 0 || (board.moveCount > 100 && validMoves.length < 3)) {
             board.pass();
             return;
         }
@@ -400,7 +437,9 @@ class EveTrainer {
             whiteName: this.population[tm.whiteIdx].name,
             blackScore: board.calculateScore().black,
             whiteScore: board.calculateScore().white,
-            moveCount: board.moveCount
+            moveCount: board.moveCount,
+            blackSpecies: this.population[tm.blackIdx].species,
+            whiteSpecies: this.population[tm.whiteIdx].species
         };
     }
 
@@ -414,7 +453,9 @@ class EveTrainer {
             whiteName: this.population[tm.whiteIdx].name,
             blackScore: board.calculateScore().black,
             whiteScore: board.calculateScore().white,
-            moveCount: board.moveCount
+            moveCount: board.moveCount,
+            blackSpecies: this.population[tm.blackIdx].species,
+            whiteSpecies: this.population[tm.whiteIdx].species
         };
     }
 
@@ -424,23 +465,23 @@ class EveTrainer {
         const winner = result.winner;
 
         if (winner === 1) {
-            black.wins++;
-            white.losses++;
+            black.wins++; white.losses++;
+            this.speciesStats[black.species].totalWins++;
+            this.speciesStats[white.species].totalLosses++;
         } else if (winner === 2) {
-            white.wins++;
-            black.losses++;
+            white.wins++; black.losses++;
+            this.speciesStats[white.species].totalWins++;
+            this.speciesStats[black.species].totalLosses++;
         } else {
-            black.draws++;
-            white.draws++;
+            black.draws++; white.draws++;
         }
 
-        black.totalGames++;
-        white.totalGames++;
+        black.totalGames++; white.totalGames++;
+        this.speciesStats[black.species].totalGames++;
+        this.speciesStats[white.species].totalGames++;
 
         black.winRate = black.totalGames > 0 ? black.wins / black.totalGames : 0;
         white.winRate = white.totalGames > 0 ? white.wins / white.totalGames : 0;
-
-        // 适应度 = 胜率 * 100 + 对局数加成（鼓励多对战）
         black.fitness = black.winRate * 100 + Math.min(10, black.totalGames / 10);
         white.fitness = white.winRate * 100 + Math.min(10, white.totalGames / 10);
     }
@@ -449,8 +490,19 @@ class EveTrainer {
     async geneticEvolve() {
         this.log(`=== 第${this.generation}代遗传进化 ===`, 'info');
 
+        // 更新种族胜率
+        for (let s = 0; s < this.maxSpecies; s++) {
+            const ss = this.speciesStats[s];
+            if (ss.totalGames > 0) {
+                const newWinRate = ss.totalWins / ss.totalGames;
+                if (newWinRate < 0.35) ss.losingStreak++;
+                else ss.losingStreak = Math.max(0, ss.losingStreak - 1);
+                ss.winRate = newWinRate;
+            }
+        }
+
         const sorted = this.getSortedIndices();
-        const eliteCount = 10;  // 保留前10名
+        const eliteCount = 10;
         const newPopulation = [];
 
         // 精英保留
@@ -459,6 +511,7 @@ class EveTrainer {
             newPopulation.push({
                 name: elite.name,
                 network: this.cloneNetwork(elite.network),
+                species: elite.species,
                 wins: elite.wins,
                 losses: elite.losses,
                 draws: elite.draws,
@@ -469,30 +522,138 @@ class EveTrainer {
             });
         }
 
-        //  Tournament Selection + Crossover + Mutation 产生新个体
+        // 计算每个种族的目标人口数（基于胜率）
+        const speciesTargets = this.calculateSpeciesTargets();
+
+        // 按种族目标产生新个体
         while (newPopulation.length < this.populationSize) {
-            // 锦标赛选择
             const p1 = this.tournamentSelect(sorted, 5);
             const p2 = this.tournamentSelect(sorted, 5);
-
-            // 交叉
             const offspring = this.ga.createOffspring(p1.network, p2.network);
+
+            // 决定新个体的种族
+            let species = p1.fitness >= p2.fitness ? p1.species : p2.species;
+
+            // 5% 变异：切换种族或创建新种族
+            if (Math.random() < 0.05) {
+                species = this.mutateSpecies(species);
+            }
 
             newPopulation.push({
                 name: `G${newPopulation.length + 1}`,
                 network: offspring,
-                wins: 0,
-                losses: 0,
-                draws: 0,
-                totalGames: 0,
-                winRate: 0,
-                fitness: 0,
+                species: species,
+                wins: 0, losses: 0, draws: 0,
+                totalGames: 0, winRate: 0, fitness: 0,
                 generation: this.generation
             });
         }
 
+        // 更新种族人口统计
+        this.updateSpeciesPopulation(newPopulation);
+
         this.population = newPopulation;
-        this.log(`遗传进化完成，保留前${eliteCount}名精英`, 'success');
+        this.log(`遗传进化完成 | 精英:${eliteCount} | 活跃种族:${this.getActiveSpeciesCount()}`, 'success');
+    }
+
+    // 计算每个种族的目标人口数
+    calculateSpeciesTargets() {
+        const activeSpecies = [];
+        for (let s = 0; s < this.maxSpecies; s++) {
+            if (this.speciesStats[s].population > 0) {
+                activeSpecies.push(s);
+            }
+        }
+        if (activeSpecies.length === 0) return {};
+
+        // 基于胜率分配人口：胜率高的种族获得更多人口
+        const scores = activeSpecies.map(s => ({
+            species: s,
+            score: Math.max(0.1, this.speciesStats[s].winRate)
+        }));
+        const totalScore = scores.reduce((sum, s) => sum + s.score, 0);
+
+        const targets = {};
+        let allocated = 0;
+        for (const s of scores) {
+            targets[s.species] = Math.max(2, Math.floor(this.populationSize * s.score / totalScore));
+            allocated += targets[s.species];
+        }
+        // 修正余数
+        const diff = this.populationSize - allocated;
+        if (diff !== 0 && scores.length > 0) {
+            targets[scores[0].species] += diff;
+        }
+        return targets;
+    }
+
+    // 种族变异：切换到其他种族或创建新种族
+    mutateSpecies(currentSpecies) {
+        const activeSpecies = [];
+        for (let s = 0; s < this.maxSpecies; s++) {
+            if (this.speciesStats[s].population > 0 && s !== currentSpecies) {
+                activeSpecies.push(s);
+            }
+        }
+
+        // 30%概率创建新种族（如果未达上限）
+        if (Math.random() < 0.3) {
+            for (let s = 0; s < this.maxSpecies; s++) {
+                if (this.speciesStats[s].population === 0) {
+                    // 创建新种族的基础权重
+                    const baseNet = new PolicyNetwork(this.boardSize);
+                    this.ga.mutate(baseNet, 0.4);
+                    this.speciesBaseWeights[s] = { ...baseNet.weights };
+                    this.speciesStats[s].winRate = 0.5;
+                    this.speciesStats[s].losingStreak = 0;
+                    this.log(`新种族 S${s} 诞生！`, 'success');
+                    return s;
+                }
+            }
+        }
+
+        // 70%概率切换到其他活跃种族
+        if (activeSpecies.length > 0) {
+            return activeSpecies[Math.floor(Math.random() * activeSpecies.length)];
+        }
+        return currentSpecies;
+    }
+
+    // 更新种族人口统计
+    updateSpeciesPopulation(population) {
+        for (let s = 0; s < this.maxSpecies; s++) {
+            this.speciesStats[s].population = 0;
+            this.speciesStats[s].totalWins = 0;
+            this.speciesStats[s].totalLosses = 0;
+            this.speciesStats[s].totalGames = 0;
+        }
+        for (const p of population) {
+            this.speciesStats[p.species].population++;
+        }
+    }
+
+    getActiveSpeciesCount() {
+        let count = 0;
+        for (let s = 0; s < this.maxSpecies; s++) {
+            if (this.speciesStats[s].population > 0) count++;
+        }
+        return count;
+    }
+
+    // 保存种族人口快照
+    saveSpeciesSnapshot() {
+        const populations = [];
+        for (let s = 0; s < this.maxSpecies; s++) {
+            populations.push(this.speciesStats[s].population);
+        }
+        this.speciesHistory.push({
+            generation: this.generation,
+            totalGames: this.totalGames,
+            populations: populations
+        });
+        if (this.speciesHistory.length > 100) {
+            this.speciesHistory = this.speciesHistory.slice(-100);
+        }
     }
 
     tournamentSelect(sortedIndices, tournamentSize) {
@@ -514,7 +675,6 @@ class EveTrainer {
         return clone;
     }
 
-    // 保存胜率快照（用于图表）
     saveWinRateSnapshot() {
         const winRates = this.population.map(p => p.winRate);
         const sorted = [...winRates].sort((a, b) => b - a);
@@ -527,13 +687,11 @@ class EveTrainer {
             avg: winRates.reduce((a, b) => a + b, 0) / winRates.length,
             median: sorted[Math.floor(sorted.length / 2)]
         });
-        // 限制历史长度
         if (this.winRateHistory.length > 100) {
             this.winRateHistory = this.winRateHistory.slice(-100);
         }
     }
 
-    // ===== 人机对战 =====
     getAIResponse(board, difficulty = 'medium') {
         let iterations;
         switch (difficulty) {
@@ -545,7 +703,6 @@ class EveTrainer {
         return this.mcts.getBestMove(board, iterations);
     }
 
-    // ===== 统计 =====
     getStats() {
         const sorted = this.getSortedIndices();
         const top10 = sorted.slice(0, 10).map(i => ({
@@ -553,10 +710,24 @@ class EveTrainer {
             winRate: this.population[i].winRate,
             totalGames: this.population[i].totalGames,
             fitness: this.population[i].fitness,
-            idx: i
+            idx: i,
+            species: this.population[i].species
         }));
         const allWinRates = this.population.map(p => p.winRate);
         const avgWinRate = allWinRates.reduce((a, b) => a + b, 0) / allWinRates.length;
+
+        // 种族摘要
+        const speciesSummary = [];
+        for (let s = 0; s < this.maxSpecies; s++) {
+            if (this.speciesStats[s].population > 0) {
+                speciesSummary.push({
+                    species: s,
+                    population: this.speciesStats[s].population,
+                    winRate: this.speciesStats[s].winRate
+                });
+            }
+        }
+
         return {
             generation: this.generation,
             totalGames: this.totalGames,
@@ -565,14 +736,15 @@ class EveTrainer {
             winRateHistory: this.winRateHistory,
             bestName: this.population[sorted[0]].name,
             bestWinRate: this.population[sorted[0]].winRate,
-            watchedAiIdx: this.watchedAiIdx
+            watchedAiIdx: this.watchedAiIdx,
+            speciesSummary: speciesSummary,
+            speciesHistory: this.speciesHistory
         };
     }
 
-    // ===== 保存/加载 =====
     getSaveData() {
         return {
-            version: '5.0',
+            version: '6.0',
             boardSize: this.boardSize,
             populationSize: this.populationSize,
             generation: this.generation,
@@ -580,6 +752,7 @@ class EveTrainer {
             population: this.population.map(p => ({
                 name: p.name,
                 network: p.network.save(),
+                species: p.species,
                 wins: p.wins,
                 losses: p.losses,
                 draws: p.draws,
@@ -588,7 +761,10 @@ class EveTrainer {
                 fitness: p.fitness,
                 generation: p.generation
             })),
+            speciesStats: this.speciesStats,
+            speciesBaseWeights: this.speciesBaseWeights,
             winRateHistory: this.winRateHistory,
+            speciesHistory: this.speciesHistory,
             timestamp: Date.now()
         };
     }
@@ -596,7 +772,6 @@ class EveTrainer {
     saveToLocalStorage() {
         try {
             const data = this.getSaveData();
-            // 只保存前50名+随机50名以控制大小
             const sorted = this.getSortedIndices();
             const keepIndices = new Set([...sorted.slice(0, 50)]);
             while (keepIndices.size < 100) {
@@ -628,8 +803,14 @@ class EveTrainer {
     }
 
     loadTrainingData(data) {
+        if (data.speciesBaseWeights) {
+            this.speciesBaseWeights = data.speciesBaseWeights;
+        }
+        if (data.speciesStats) {
+            this.speciesStats = data.speciesStats;
+        }
+
         if (data.population && data.population.length > 0) {
-            // 如果数据是压缩的，需要重建200个
             if (data._compact && data._keptIndices) {
                 this.population = [];
                 const keptMap = {};
@@ -644,6 +825,7 @@ class EveTrainer {
                         this.population.push({
                             name: p.name,
                             network: net,
+                            species: p.species || 0,
                             wins: p.wins || 0,
                             losses: p.losses || 0,
                             draws: p.draws || 0,
@@ -653,9 +835,11 @@ class EveTrainer {
                             generation: p.generation || 0
                         });
                     } else {
+                        const species = i % this.speciesCount;
                         this.population.push({
                             name: `G${i + 1}`,
                             network: new PolicyNetwork(this.boardSize),
+                            species: species,
                             wins: 0, losses: 0, draws: 0,
                             totalGames: 0, winRate: 0, fitness: 0, generation: 0
                         });
@@ -668,6 +852,7 @@ class EveTrainer {
                     return {
                         name: p.name,
                         network: net,
+                        species: p.species || 0,
                         wins: p.wins || 0,
                         losses: p.losses || 0,
                         draws: p.draws || 0,
@@ -682,8 +867,8 @@ class EveTrainer {
         if (data.generation !== undefined) this.generation = data.generation;
         if (data.totalGames !== undefined) this.totalGames = data.totalGames;
         if (data.winRateHistory) this.winRateHistory = data.winRateHistory;
+        if (data.speciesHistory) this.speciesHistory = data.speciesHistory;
 
-        // 更新最佳模型
         const sorted = this.getSortedIndices();
         this.bestIdx = sorted[0];
         this.mcts.setPolicyNetwork(this.population[this.bestIdx].network);

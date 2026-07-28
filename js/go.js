@@ -307,6 +307,42 @@ class GoBoard {
         return { black: blackTerritory, white: whiteTerritory };
     }
 
+    // 返回每个交叉点的领地归属 (0=无主, 1=黑, 2=白)
+    calculateTerritoryDetail() {
+        const visited = new Set();
+        const territoryMap = new Int8Array(this.totalSize);
+
+        for (let i = 0; i < this.totalSize; i++) {
+            if (this.board[i] === 0 && !visited.has(i)) {
+                const emptyGroup = [];
+                const borders = new Set();
+                const stack = [i];
+
+                while (stack.length > 0) {
+                    const cur = stack.pop();
+                    if (visited.has(cur)) continue;
+                    if (this.board[cur] !== 0) {
+                        borders.add(this.board[cur]);
+                        continue;
+                    }
+                    visited.add(cur);
+                    emptyGroup.push(cur);
+                    const neighbors = this.getNeighbors(cur);
+                    for (const n of neighbors) stack.push(n);
+                }
+
+                if (borders.size === 1) {
+                    const owner = borders.values().next().value;
+                    for (const idx of emptyGroup) {
+                        territoryMap[idx] = owner;
+                    }
+                }
+            }
+        }
+
+        return { map: territoryMap, black: 0, white: 0 };
+    }
+
     getWinner() {
         if (!this.isGameOver()) return null;
         const score = this.calculateScore();

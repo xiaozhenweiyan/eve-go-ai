@@ -89,6 +89,34 @@ header h1 {
 }
 #watch-status { color: #00ff88; font-size: 0.85em; margin-left: auto; }
 
+.toggle-btn {
+    padding: 6px 14px; border: 1px solid rgba(0,210,255,0.3);
+    background: rgba(255,255,255,0.05); color: #aaa;
+    border-radius: 6px; cursor: pointer; font-size: 0.85em;
+    transition: all 0.2s;
+}
+.toggle-btn:hover { background: rgba(0,210,255,0.15); }
+.toggle-btn.active {
+    background: rgba(0,210,255,0.25); color: #00d2ff;
+    border-color: #00d2ff;
+}
+
+.species-tag {
+    display: inline-block; padding: 2px 6px; border-radius: 8px;
+    font-size: 0.75em; color: #fff; text-align: center;
+    font-weight: 600;
+}
+
+#species-chart-canvas {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px; width: 100%; max-width: 900px;
+}
+
+#species-legend {
+    display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;
+    justify-content: center;
+}
+
 /* 侧边栏 */
 #sidebar { grid-column: 2; }
 
@@ -128,7 +156,7 @@ header h1 {
 #leaderboard { display: flex; flex-direction: column; gap: 4px; }
 
 .leaderboard-header {
-    display: grid; grid-template-columns: 40px 1fr 60px 50px;
+    display: grid; grid-template-columns: 36px 1fr 50px 55px 45px;
     gap: 4px; padding: 6px 8px; font-size: 0.75em;
     color: #888; border-bottom: 1px solid rgba(255,255,255,0.1);
 }
@@ -136,7 +164,7 @@ header h1 {
 .leaderboard-header span:first-child { text-align: left; }
 
 .leaderboard-row {
-    display: grid; grid-template-columns: 40px 1fr 60px 50px;
+    display: grid; grid-template-columns: 36px 1fr 50px 55px 45px;
     gap: 4px; padding: 5px 8px; font-size: 0.8em;
     background: rgba(255,255,255,0.03); border-radius: 5px;
     cursor: pointer; transition: all 0.2s; align-items: center;
